@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="112" fill="#0d0d0d"/>
+
+  <!-- Outer vinyl disc -->
+  <circle cx="256" cy="256" r="210" fill="#161616"/>
+
+  <!-- Groove rings -->
+  <circle cx="256" cy="256" r="198" fill="none" stroke="#252525" stroke-width="3"/>
+  <circle cx="256" cy="256" r="182" fill="none" stroke="#222" stroke-width="2"/>
+  <circle cx="256" cy="256" r="166" fill="none" stroke="#222" stroke-width="2"/>
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#222" stroke-width="2"/>
+  <circle cx="256" cy="256" r="134" fill="none" stroke="#222" stroke-width="1.5"/>
+  <circle cx="256" cy="256" r="118" fill="none" stroke="#222" stroke-width="1.5"/>
+  <circle cx="256" cy="256" r="102" fill="none" stroke="#1f1f1f" stroke-width="1.5"/>
+
+  <!-- Center label (Spotify green) -->
+  <circle cx="256" cy="256" r="76" fill="#1db954"/>
+
+  <!-- Subtle label ring -->
+  <circle cx="256" cy="256" r="72" fill="none" stroke="rgba(0,0,0,0.15)" stroke-width="2"/>
+
+  <!-- Center spindle hole -->
+  <circle cx="256" cy="256" r="18" fill="#0d0d0d"/>
+
+  <!-- Tiny shine highlight on disc -->
+  <ellipse cx="180" cy="170" rx="28" ry="14" fill="white" opacity="0.04" transform="rotate(-30 180 170)"/>
+</svg>

@@ -1,0 +1,26 @@
+{
+  "name": "Shelflife",
+  "short_name": "Shelflife",
+  "description": "Your personal album rotation tracker",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0d0d0d",
+  "theme_color": "#0d0d0d",
+  "orientation": "portrait-primary",
+  "categories": ["music", "lifestyle"],
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
