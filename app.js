@@ -3,19 +3,23 @@
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
 let deferredInstall = null;
-let pendingArt = null; // { value: string } — data URL wins over artUrl field
+let pendingArt = null;       // { value: string } — data URL wins over artUrl field
+let pendingRemoveId = null;  // id of album awaiting confirm-remove
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_ALBUMS = 20;
 
 // ─── DOM ──────────────────────────────────────────────────────────────────────
-const $shelf        = document.getElementById('shelf');
-const $empty        = document.getElementById('emptyState');
-const $modal        = document.getElementById('modal');
-const $overlay      = document.getElementById('overlay');
-const $addBtn       = document.getElementById('addBtn');
-const $shelfFullMsg = document.getElementById('shelfFullMsg');
-const $closeBtn     = document.getElementById('closeModal');
+const $shelf          = document.getElementById('shelf');
+const $empty          = document.getElementById('emptyState');
+const $modal          = document.getElementById('modal');
+const $overlay        = document.getElementById('overlay');
+const $addBtn         = document.getElementById('addBtn');
+const $shelfFullMsg   = document.getElementById('shelfFullMsg');
+const $closeBtn       = document.getElementById('closeModal');
+const $confirmDialog  = document.getElementById('confirmDialog');
+const $confirmOk      = document.getElementById('confirmOk');
+const $confirmCancel  = document.getElementById('confirmCancel');
 const $instBtn  = document.getElementById('installBtn');
 const $form     = document.getElementById('albumForm');
 const $artDrop  = document.getElementById('artDrop');
@@ -123,9 +127,7 @@ function bindEvents() {
     if (rmBtn) {
       e.stopPropagation();
       const id = rmBtn.closest('.album-card').dataset.id;
-      albums = albums.filter(a => a.id !== id);
-      save();
-      render();
+      openConfirm(id);
       return;
     }
     const card = e.target.closest('.album-card');
@@ -133,6 +135,20 @@ function bindEvents() {
       const a = albums.find(a => a.id === card.dataset.id);
       if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
     }
+  });
+
+  // ── Confirm dialog ────────────────────────────────────────────────────────
+  $confirmCancel.addEventListener('click', closeConfirm);
+  $confirmOk.addEventListener('click', () => {
+    if (pendingRemoveId) {
+      albums = albums.filter(a => a.id !== pendingRemoveId);
+      save();
+      render();
+    }
+    closeConfirm();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !$confirmDialog.hidden) closeConfirm();
   });
 
   // ── Modal open / close ────────────────────────────────────────────────────
@@ -229,6 +245,22 @@ function closeModal() {
     $modal.hidden = true;
     resetForm();
   }, 340);
+}
+
+// ─── Confirm dialog ───────────────────────────────────────────────────────────
+function openConfirm(id) {
+  pendingRemoveId = id;
+  $confirmDialog.hidden = false;
+  $overlay.classList.add('visible');
+  requestAnimationFrame(() => requestAnimationFrame(() => $confirmDialog.classList.add('open')));
+  setTimeout(() => $confirmCancel.focus(), 60);
+}
+
+function closeConfirm() {
+  pendingRemoveId = null;
+  $confirmDialog.classList.remove('open');
+  $overlay.classList.remove('visible');
+  setTimeout(() => { $confirmDialog.hidden = true; }, 240);
 }
 
 function resetForm() {

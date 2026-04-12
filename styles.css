@@ -256,6 +256,95 @@ main { padding: 10px; }
 .overlay.visible { opacity: 1; pointer-events: all; }
 
 
+/* ─── Confirm Dialog ──────────────────────────────────────────────────────── */
+.confirm-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.confirm-dialog[hidden] { display: none !important; }
+
+.confirm-dialog > p,
+.confirm-dialog > .confirm-actions {
+  pointer-events: all;
+}
+
+.confirm-dialog::before {
+  content: '';
+  display: none;
+}
+
+/* Card that holds the message + buttons */
+.confirm-dialog {
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Re-use a wrapper approach — the dialog itself IS the card */
+.confirm-dialog {
+  inset: unset;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -44%) scale(0.95);
+  opacity: 0;
+  transition: transform 0.22s ease, opacity 0.22s ease;
+  width: min(320px, calc(100vw - 40px));
+  background: #2c2c2e;
+  border-radius: 16px;
+  padding: 24px 20px 18px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  pointer-events: all;
+}
+.confirm-dialog.open {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+
+#confirmMsg {
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--text);
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.confirm-btn {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.confirm-btn:active { transform: scale(0.96); }
+
+.confirm-btn--cancel {
+  background: var(--surface2);
+  color: var(--text);
+}
+.confirm-btn--cancel:hover { background: #3a3a3c; }
+
+.confirm-btn--ok {
+  background: rgba(255,69,58,0.85);
+  color: #fff;
+}
+.confirm-btn--ok:hover { background: rgb(255,69,58); }
+
+
 /* ─── Modal ───────────────────────────────────────────────────────────────── */
 .modal {
   position: fixed; inset: 0;

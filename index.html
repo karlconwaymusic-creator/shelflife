@@ -57,6 +57,15 @@
   <!-- Overlay -->
   <div id="overlay" class="overlay" aria-hidden="true"></div>
 
+  <!-- Confirm Remove Dialog -->
+  <div id="confirmDialog" class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmMsg" hidden>
+    <p id="confirmMsg">Are you sure you want to take this one off the shelf?</p>
+    <div class="confirm-actions">
+      <button id="confirmCancel" class="confirm-btn confirm-btn--cancel">Cancel</button>
+      <button id="confirmOk"     class="confirm-btn confirm-btn--ok">Remove</button>
+    </div>
+  </div>
+
   <!-- Add Album Modal -->
   <div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" hidden>
     <div class="modal-sheet">
