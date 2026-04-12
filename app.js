@@ -5,13 +5,17 @@ let albums = [];
 let deferredInstall = null;
 let pendingArt = null; // { value: string } — data URL wins over artUrl field
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+const MAX_ALBUMS = 20;
+
 // ─── DOM ──────────────────────────────────────────────────────────────────────
-const $shelf    = document.getElementById('shelf');
-const $empty    = document.getElementById('emptyState');
-const $modal    = document.getElementById('modal');
-const $overlay  = document.getElementById('overlay');
-const $addBtn   = document.getElementById('addBtn');
-const $closeBtn = document.getElementById('closeModal');
+const $shelf        = document.getElementById('shelf');
+const $empty        = document.getElementById('emptyState');
+const $modal        = document.getElementById('modal');
+const $overlay      = document.getElementById('overlay');
+const $addBtn       = document.getElementById('addBtn');
+const $shelfFullMsg = document.getElementById('shelfFullMsg');
+const $closeBtn     = document.getElementById('closeModal');
 const $instBtn  = document.getElementById('installBtn');
 const $form     = document.getElementById('albumForm');
 const $artDrop  = document.getElementById('artDrop');
@@ -51,6 +55,11 @@ function save() {
 function render() {
   $shelf.innerHTML = '';
   $empty.style.display = albums.length ? 'none' : 'flex';
+
+  const isFull = albums.length >= MAX_ALBUMS;
+  $addBtn.disabled = isFull;
+  $addBtn.setAttribute('aria-disabled', isFull);
+  $shelfFullMsg.hidden = !isFull;
 
   for (const a of albums) {
     const card = document.createElement('div');

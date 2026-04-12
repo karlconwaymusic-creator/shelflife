@@ -98,10 +98,28 @@ h1 {
 }
 .add-btn:hover  { background: var(--accent-hi); }
 .add-btn:active { transform: scale(0.88); }
+.add-btn:disabled {
+  background: var(--surface2);
+  color: var(--text3);
+  cursor: not-allowed;
+  transform: none;
+}
 
 
 /* ─── Main / Grid ─────────────────────────────────────────────────────────── */
 main { padding: 10px; }
+
+.shelf-full-msg {
+  background: var(--surface);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius);
+  color: var(--text2);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  padding: 11px 14px;
+  margin-bottom: 10px;
+  text-align: center;
+}
 
 .shelf-grid {
   display: grid;
