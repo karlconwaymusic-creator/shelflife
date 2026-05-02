@@ -276,12 +276,12 @@ let lpFired = false;
 let lpStart = null;
 let lpCard  = null;
 
-const cancelLp = () => {
+function cancelLp() {
   clearTimeout(lpTimer);
   lpCard?.classList.remove('album-card--pressing');
   lpStart = null;
   lpCard  = null;
-};
+}
 
 // ─── Event wiring ─────────────────────────────────────────────────────────────
 function bindEvents() {
