@@ -1,5 +1,5 @@
-// LPQ service worker — cache-first for app shell, network-first for external images
-const CACHE = 'lpq-v2';
+// LPQ service worker — network-first for app shell, network-only for external images
+const CACHE = 'lpq-v3';
 const SHELL = [
   './',
   './index.html',
@@ -31,25 +31,24 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
 
-  // App shell — cache first
-  if (url.origin === self.location.origin) {
+  // External resources (album art URLs) — network only
+  if (url.origin !== self.location.origin) {
     e.respondWith(
-      caches.match(e.request)
-        .then(cached => cached || fetch(e.request).then(res => {
-          // Cache successful GET responses for the app shell
-          if (e.request.method === 'GET' && res.ok) {
-            const clone = res.clone();
-            caches.open(CACHE).then(c => c.put(e.request, clone));
-          }
-          return res;
-        }))
-        .catch(() => caches.match('./index.html'))
+      fetch(e.request).catch(() => new Response('', { status: 408 }))
     );
     return;
   }
 
-  // External resources (e.g. album art URLs) — network first, silent fail
+  // App shell — network first, fall back to cache when offline
   e.respondWith(
-    fetch(e.request).catch(() => new Response('', { status: 408 }))
+    fetch(e.request)
+      .then(res => {
+        if (e.request.method === 'GET' && res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+        }
+        return res;
+      })
+      .catch(() => caches.match(e.request).then(cached => cached || caches.match('./index.html')))
   );
 });
