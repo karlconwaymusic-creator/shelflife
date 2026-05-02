@@ -345,7 +345,7 @@ function bindEvents() {
     const id = pendingContextId;
     if (!id) return;
     closeContextMenu();
-    setTimeout(() => { deleteAlbum(id); showToast('Removed from shelf'); }, 180);
+    setTimeout(() => { archiveAlbum(id); showToast('Removed from shelf'); }, 180);
   });
 
   // ── Overlay closes whatever is open ──────────────────────────────────────
