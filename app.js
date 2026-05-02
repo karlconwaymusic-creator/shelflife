@@ -2,31 +2,41 @@
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
-let pendingArt = null;       // { value: string } — data URL wins over artUrl field
-let pendingRemoveId = null;  // id of album awaiting confirm-remove
+let pendingArt = null;
+let pendingContextId = null;
+let currentView = 'shelf';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
 const MAX_ALBUMS = 20;
 
 // ─── DOM ──────────────────────────────────────────────────────────────────────
-const $shelf          = document.getElementById('shelf');
-const $empty          = document.getElementById('emptyState');
-const $modal          = document.getElementById('modal');
-const $overlay        = document.getElementById('overlay');
-const $addBtn         = document.getElementById('addBtn');
-const $closeBtn       = document.getElementById('closeModal');
-const $confirmDialog  = document.getElementById('confirmDialog');
-const $confirmOk      = document.getElementById('confirmOk');
-const $confirmCancel  = document.getElementById('confirmCancel');
-const $form     = document.getElementById('albumForm');
-const $artDrop  = document.getElementById('artDrop');
-const $artFile  = document.getElementById('artFile');
-const $artImg   = document.getElementById('artImg');
-const $artPh    = document.getElementById('artPlaceholder');
-const $artUrl   = document.getElementById('artUrl');
-const $title    = document.getElementById('albumTitle');
-const $artist   = document.getElementById('artistName');
-const $spotify  = document.getElementById('spotifyUrl');
+const $shelf        = document.getElementById('shelf');
+const $empty        = document.getElementById('emptyState');
+const $vinylList    = document.getElementById('vinylList');
+const $vinylEmpty   = document.getElementById('vinylEmpty');
+const $archiveList  = document.getElementById('archiveList');
+const $archiveEmpty = document.getElementById('archiveEmpty');
+const $modal        = document.getElementById('modal');
+const $overlay      = document.getElementById('overlay');
+const $addBtn       = document.getElementById('addBtn');
+const $closeBtn     = document.getElementById('closeModal');
+const $form         = document.getElementById('albumForm');
+const $artDrop      = document.getElementById('artDrop');
+const $artFile      = document.getElementById('artFile');
+const $artImg       = document.getElementById('artImg');
+const $artPh        = document.getElementById('artPlaceholder');
+const $artUrl       = document.getElementById('artUrl');
+const $title        = document.getElementById('albumTitle');
+const $artist       = document.getElementById('artistName');
+const $spotify      = document.getElementById('spotifyUrl');
+const $contextMenu  = document.getElementById('contextMenu');
+const $ctxArtImg    = document.getElementById('contextArtImg');
+const $ctxNoArt     = document.getElementById('contextNoArt');
+const $ctxTitle     = document.getElementById('contextTitle');
+const $ctxArtist    = document.getElementById('contextArtist');
+const $ctxVinyl     = document.getElementById('ctxVinyl');
+const $ctxVinylLbl  = document.getElementById('ctxVinylLabel');
+const $ctxArchive   = document.getElementById('ctxArchive');
+const $ctxRemove    = document.getElementById('ctxRemove');
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 (function init() {
@@ -47,7 +57,6 @@ const $spotify  = document.getElementById('spotifyUrl');
   }
 })();
 
-// ─── Storage ──────────────────────────────────────────────────────────────────
 // ─── Toast ────────────────────────────────────────────────────────────────────
 let toastTimer = null;
 function showToast(msg) {
@@ -64,6 +73,7 @@ function showToast(msg) {
   toastTimer = setTimeout(() => $t.classList.add('toast--hidden'), 3000);
 }
 
+// ─── Storage ──────────────────────────────────────────────────────────────────
 function save() {
   try { localStorage.setItem('lpq', JSON.stringify(albums)); }
   catch (e) {
@@ -76,23 +86,22 @@ function save() {
 
 // ─── Render ───────────────────────────────────────────────────────────────────
 function render() {
+  renderShelf();
+  renderVinyl();
+  renderArchive();
+}
+
+function renderShelf() {
+  const active = albums.filter(a => !a.archived);
   $shelf.innerHTML = '';
-  $empty.style.display = albums.length ? 'none' : 'flex';
+  $empty.style.display = active.length ? 'none' : 'flex';
 
-  const isFull = albums.length >= MAX_ALBUMS;
-  $addBtn.disabled = false;
-  $addBtn.removeAttribute('aria-disabled');
-
-  for (const a of albums) {
+  for (const a of active) {
     const card = document.createElement('div');
     card.className = 'album-card';
     card.dataset.id = a.id;
     card.setAttribute('role', 'listitem');
-    if (a.spotifyUrl) {
-      card.setAttribute('aria-label', `${a.title} by ${a.artist} — opens Spotify`);
-    } else {
-      card.setAttribute('aria-label', `${a.title} by ${a.artist}`);
-    }
+    card.setAttribute('aria-label', `${a.title} by ${a.artist}${a.spotifyUrl ? ' — opens Spotify' : ''}`);
 
     if (a.art) {
       const img = document.createElement('img');
@@ -109,25 +118,70 @@ function render() {
       card.appendChild(noArt);
     }
 
-    const info = document.createElement('div');
-    info.className = 'album-info';
-    info.innerHTML =
-      `<div class="album-title">${esc(a.title)}</div>` +
-      `<div class="album-artist">${esc(a.artist)}</div>`;
-    card.appendChild(info);
-
-    const rmBtn = document.createElement('button');
-    rmBtn.className = 'remove-btn';
-    rmBtn.dataset.action = 'remove';
-    rmBtn.setAttribute('aria-label', `Remove ${esc(a.title)}`);
-    rmBtn.innerHTML =
-      `<svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor"` +
-      ` stroke-width="2.5" stroke-linecap="round">` +
-      `<line x1="1" y1="1" x2="11" y2="11"/><line x1="11" y1="1" x2="1" y2="11"/></svg>`;
-    card.appendChild(rmBtn);
-
     $shelf.appendChild(card);
   }
+}
+
+function renderVinyl() {
+  const vinyl = albums.filter(a => a.vinyl);
+  $vinylList.innerHTML = '';
+  $vinylEmpty.style.display = vinyl.length ? 'none' : 'flex';
+
+  for (const a of vinyl) {
+    $vinylList.appendChild(makeListRow(a, [
+      { label: 'Remove', action() { toggleVinyl(a.id); renderVinyl(); } }
+    ]));
+  }
+}
+
+function renderArchive() {
+  const archived = albums.filter(a => a.archived);
+  $archiveList.innerHTML = '';
+  $archiveEmpty.style.display = archived.length ? 'none' : 'flex';
+
+  for (const a of archived) {
+    $archiveList.appendChild(makeListRow(a, [
+      { label: 'Restore', action() { restoreAlbum(a.id); } },
+      { label: 'Delete',  danger: true, action() { deleteAlbum(a.id); } },
+    ]));
+  }
+}
+
+function makeListRow(a, actions) {
+  const row = document.createElement('div');
+  row.className = 'list-row';
+
+  const thumb = document.createElement('div');
+  thumb.className = 'list-thumb';
+  if (a.art) {
+    const img = document.createElement('img');
+    img.src = a.art;
+    img.alt = '';
+    img.loading = 'lazy';
+    thumb.appendChild(img);
+  } else {
+    thumb.classList.add('list-thumb--empty');
+    thumb.textContent = '♪';
+  }
+
+  const meta = document.createElement('div');
+  meta.className = 'list-meta';
+  meta.innerHTML =
+    `<div class="list-title">${esc(a.title)}</div>` +
+    `<div class="list-artist">${esc(a.artist)}</div>`;
+
+  const actionsEl = document.createElement('div');
+  actionsEl.className = 'list-actions';
+  for (const { label, danger, action } of actions) {
+    const btn = document.createElement('button');
+    btn.className = 'list-btn' + (danger ? ' list-btn--danger' : '');
+    btn.textContent = label;
+    btn.addEventListener('click', action);
+    actionsEl.appendChild(btn);
+  }
+
+  row.append(thumb, meta, actionsEl);
+  return row;
 }
 
 // Minimal HTML escape — only used for inserting user strings into innerHTML
@@ -137,48 +191,185 @@ function esc(s) {
   );
 }
 
+// ─── Mutations ────────────────────────────────────────────────────────────────
+function toggleVinyl(id) {
+  const a = albums.find(a => a.id === id);
+  if (!a) return;
+  a.vinyl = !a.vinyl;
+  save();
+}
+
+function archiveAlbum(id) {
+  const a = albums.find(a => a.id === id);
+  if (!a) return;
+  a.archived = true;
+  save();
+  render();
+}
+
+function restoreAlbum(id) {
+  const active = albums.filter(a => !a.archived);
+  if (active.length >= MAX_ALBUMS) {
+    showToast('Your shelf is full — remove an album to make room.');
+    return;
+  }
+  const a = albums.find(a => a.id === id);
+  if (!a) return;
+  a.archived = false;
+  save();
+  render();
+}
+
+function deleteAlbum(id) {
+  albums = albums.filter(a => a.id !== id);
+  save();
+  render();
+}
+
+// ─── View switching ───────────────────────────────────────────────────────────
+function switchView(view) {
+  currentView = view;
+  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  document.querySelectorAll('.view').forEach(el => {
+    el.classList.toggle('view--hidden', el.id !== `view${cap(view)}`);
+  });
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('tab-btn--active', btn.dataset.view === view);
+  });
+  $addBtn.style.display = view === 'shelf' ? '' : 'none';
+}
+
+// ─── Context menu ─────────────────────────────────────────────────────────────
+function openContextMenu(id) {
+  const a = albums.find(a => a.id === id);
+  if (!a) return;
+  pendingContextId = id;
+
+  if (a.art) {
+    $ctxArtImg.src    = a.art;
+    $ctxArtImg.hidden = false;
+    $ctxNoArt.hidden  = true;
+  } else {
+    $ctxArtImg.hidden = true;
+    $ctxNoArt.hidden  = false;
+  }
+  $ctxTitle.textContent    = a.title;
+  $ctxArtist.textContent   = a.artist;
+  $ctxVinylLbl.textContent = a.vinyl ? 'Remove from Vinyl' : 'Buy on Vinyl';
+  $ctxVinyl.classList.toggle('context-btn--active', !!a.vinyl);
+
+  $contextMenu.hidden = false;
+  $overlay.classList.add('visible');
+  requestAnimationFrame(() => requestAnimationFrame(() => $contextMenu.classList.add('open')));
+}
+
+function closeContextMenu() {
+  pendingContextId = null;
+  $contextMenu.classList.remove('open');
+  $overlay.classList.remove('visible');
+  setTimeout(() => { $contextMenu.hidden = true; }, 300);
+}
+
+// ─── Long press ───────────────────────────────────────────────────────────────
+let lpTimer = null;
+let lpFired = false;
+let lpStart = null;
+let lpCard  = null;
+
+const cancelLp = () => {
+  clearTimeout(lpTimer);
+  lpCard?.classList.remove('album-card--pressing');
+  lpStart = null;
+  lpCard  = null;
+};
+
 // ─── Event wiring ─────────────────────────────────────────────────────────────
 function bindEvents() {
-  // ── Shelf (event delegation) ──────────────────────────────────────────────
-  $shelf.addEventListener('click', e => {
-    const rmBtn = e.target.closest('[data-action="remove"]');
-    if (rmBtn) {
-      e.stopPropagation();
-      const id = rmBtn.closest('.album-card').dataset.id;
-      openConfirm(id);
-      return;
-    }
-    const card = e.target.closest('.album-card');
-    if (card) {
-      const a = albums.find(a => a.id === card.dataset.id);
-      if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
-    }
+  // ── Nav ───────────────────────────────────────────────────────────────────
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchView(btn.dataset.view));
   });
 
-  // ── Confirm dialog ────────────────────────────────────────────────────────
-  $confirmCancel.addEventListener('click', closeConfirm);
-  $confirmOk.addEventListener('click', () => {
-    if (pendingRemoveId) {
-      albums = albums.filter(a => a.id !== pendingRemoveId);
-      save();
-      render();
-    }
-    closeConfirm();
+  // ── Long press on shelf ───────────────────────────────────────────────────
+  $shelf.addEventListener('pointerdown', e => {
+    const card = e.target.closest('.album-card');
+    if (!card) return;
+    lpFired = false;
+    lpCard  = card;
+    lpStart = { x: e.clientX, y: e.clientY };
+    card.classList.add('album-card--pressing');
+    lpTimer = setTimeout(() => {
+      lpFired = true;
+      card.classList.remove('album-card--pressing');
+      navigator.vibrate?.(12);
+      openContextMenu(card.dataset.id);
+    }, 450);
   });
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && !$confirmDialog.hidden) closeConfirm();
+
+  $shelf.addEventListener('pointermove', e => {
+    if (!lpStart) return;
+    if (Math.abs(e.clientX - lpStart.x) > 8 || Math.abs(e.clientY - lpStart.y) > 8) cancelLp();
+  });
+
+  $shelf.addEventListener('pointerup',     cancelLp);
+  $shelf.addEventListener('pointercancel', cancelLp);
+  $shelf.addEventListener('contextmenu',   e => e.preventDefault());
+
+  $shelf.addEventListener('click', e => {
+    if (lpFired) { lpFired = false; return; }
+    const card = e.target.closest('.album-card');
+    if (!card) return;
+    const a = albums.find(a => a.id === card.dataset.id);
+    if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
+  });
+
+  // ── Context menu actions ──────────────────────────────────────────────────
+  $ctxVinyl.addEventListener('click', () => {
+    const id = pendingContextId;
+    if (!id) return;
+    toggleVinyl(id);
+    const a = albums.find(a => a.id === id);
+    showToast(a?.vinyl ? 'Added to vinyl wishlist' : 'Removed from vinyl wishlist');
+    renderVinyl();
+    closeContextMenu();
+  });
+
+  $ctxArchive.addEventListener('click', () => {
+    const id = pendingContextId;
+    if (!id) return;
+    closeContextMenu();
+    setTimeout(() => { archiveAlbum(id); showToast('Archived'); }, 180);
+  });
+
+  $ctxRemove.addEventListener('click', () => {
+    const id = pendingContextId;
+    if (!id) return;
+    closeContextMenu();
+    setTimeout(() => { deleteAlbum(id); showToast('Removed from shelf'); }, 180);
+  });
+
+  // ── Overlay closes whatever is open ──────────────────────────────────────
+  $overlay.addEventListener('click', () => {
+    if (!$modal.hidden)       closeModal();
+    else if (!$contextMenu.hidden) closeContextMenu();
   });
 
   // ── Modal open / close ────────────────────────────────────────────────────
   $addBtn.addEventListener('click', () => {
-    if (albums.length >= MAX_ALBUMS) { showToast('Your shelf is full — remove an album to make room.'); return; }
+    if (albums.filter(a => !a.archived).length >= MAX_ALBUMS) {
+      showToast('Your shelf is full — remove an album to make room.');
+      return;
+    }
     openModal();
   });
   $closeBtn.addEventListener('click', closeModal);
-  $overlay.addEventListener('click', closeModal);
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!$modal.hidden)            closeModal();
+    else if (!$contextMenu.hidden) closeContextMenu();
+  });
 
-// ── Art drop zone ─────────────────────────────────────────────────────────
+  // ── Art drop zone ─────────────────────────────────────────────────────────
   $artDrop.addEventListener('click', () => $artFile.click());
   $artDrop.addEventListener('keydown', e => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $artFile.click(); }
@@ -222,7 +413,7 @@ function bindEvents() {
       return;
     }
     urlTimer = setTimeout(() => {
-      if (pendingArt) return; // uploaded file takes priority
+      if (pendingArt) return;
       const probe = new Image();
       probe.onload  = () => showArt(url);
       probe.onerror = () => {};
@@ -238,7 +429,6 @@ function bindEvents() {
 function openModal() {
   $modal.hidden = false;
   $overlay.classList.add('visible');
-  // Double rAF lets the browser paint before starting the CSS transition
   requestAnimationFrame(() => requestAnimationFrame(() => $modal.classList.add('open')));
   setTimeout(() => $title.focus(), 60);
 }
@@ -250,22 +440,6 @@ function closeModal() {
     $modal.hidden = true;
     resetForm();
   }, 340);
-}
-
-// ─── Confirm dialog ───────────────────────────────────────────────────────────
-function openConfirm(id) {
-  pendingRemoveId = id;
-  $confirmDialog.hidden = false;
-  $overlay.classList.add('visible');
-  requestAnimationFrame(() => requestAnimationFrame(() => $confirmDialog.classList.add('open')));
-  setTimeout(() => $confirmCancel.focus(), 60);
-}
-
-function closeConfirm() {
-  pendingRemoveId = null;
-  $confirmDialog.classList.remove('open');
-  $overlay.classList.remove('visible');
-  setTimeout(() => { $confirmDialog.hidden = true; }, 240);
 }
 
 function resetForm() {
@@ -282,7 +456,6 @@ async function processFile(file) {
     const dataUrl = await cropAndCompress(file, 400, 0.83);
     pendingArt = { value: dataUrl };
     showArt(dataUrl);
-    // Clear URL field so it's obvious the file wins
     $artUrl.value = '';
   } catch (err) {
     console.error('Image processing error:', err);
@@ -297,12 +470,10 @@ function cropAndCompress(file, dim, quality) {
       const img = new Image();
       img.onerror = reject;
       img.onload = () => {
-        // Square-crop from the center, then scale to dim×dim
         const s   = Math.min(img.width, img.height);
         const sx  = (img.width  - s) / 2;
         const sy  = (img.height - s) / 2;
         const out = Math.min(s, dim);
-
         const canvas = document.createElement('canvas');
         canvas.width = canvas.height = out;
         canvas.getContext('2d').drawImage(img, sx, sy, s, s, 0, 0, out, out);
@@ -343,12 +514,14 @@ function onSubmit(e) {
   const art = pendingArt?.value ?? (artUrlVal || null);
 
   const album = {
-    id: uid(),
+    id:         uid(),
     title,
     artist,
     art,
     spotifyUrl: $spotify.value.trim() || null,
-    addedAt: Date.now(),
+    addedAt:    Date.now(),
+    vinyl:      false,
+    archived:   false,
   };
 
   albums.unshift(album);
@@ -361,13 +534,12 @@ function onSubmit(e) {
 
 // Convert a Spotify web URL or existing URI to the spotify: URI scheme.
 // https://open.spotify.com/album/4aawyAB9vmqN3uQ7FjRGTy → spotify:album:4aawyAB9vmqN3uQ7FjRGTy
-// Already-correct URIs (spotify:album:...) are returned unchanged.
 function toSpotifyUri(url) {
   if (!url) return url;
   if (url.startsWith('spotify:')) return url;
   try {
-    const { pathname } = new URL(url);        // e.g. /album/4aawyAB9vmqN3uQ7FjRGTy
-    const parts = pathname.split('/').filter(Boolean); // ['album', '4aaw...']
+    const { pathname } = new URL(url);
+    const parts = pathname.split('/').filter(Boolean);
     if (parts.length >= 2) return `spotify:${parts[0]}:${parts[1]}`;
   } catch { /* not a valid URL, fall through */ }
   return url;

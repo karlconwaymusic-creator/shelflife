@@ -14,6 +14,7 @@
   --radius:    10px;
   --safe-b:    env(safe-area-inset-bottom, 0px);
   --safe-t:    env(safe-area-inset-top, 0px);
+  --nav-h:     60px;
 }
 
 html { height: 100%; background: var(--bg); }
@@ -98,23 +99,25 @@ h1 {
 }
 .add-btn:hover  { background: var(--accent-hi); }
 .add-btn:active { transform: scale(0.88); }
-.add-btn:disabled {
-  background: var(--surface2);
-  color: var(--text3);
-  cursor: not-allowed;
-  transform: none;
+
+
+/* ─── Views ───────────────────────────────────────────────────────────────── */
+main { padding: 0; }
+
+.view {
+  padding: 10px;
+  padding-bottom: calc(var(--nav-h) + var(--safe-b) + 16px);
 }
+.view--hidden { display: none !important; }
 
 
-/* ─── Main / Grid ─────────────────────────────────────────────────────────── */
-main { padding: 10px; }
-
+/* ─── Toast ───────────────────────────────────────────────────────────────── */
 .toast {
   position: fixed;
-  bottom: calc(env(safe-area-inset-bottom) + 24px);
+  bottom: calc(var(--nav-h) + var(--safe-b) + 12px);
   left: 50%;
   transform: translateX(-50%) translateY(0);
-  background: var(--surface);
+  background: var(--surface2);
   border: 1px solid rgba(255,255,255,0.1);
   border-radius: 999px;
   color: var(--text);
@@ -124,13 +127,15 @@ main { padding: 10px; }
   pointer-events: none;
   opacity: 1;
   transition: opacity 0.3s ease, transform 0.3s ease;
-  z-index: 1000;
+  z-index: 200;
 }
 .toast.toast--hidden {
   opacity: 0;
   transform: translateX(-50%) translateY(8px);
 }
 
+
+/* ─── Shelf grid ──────────────────────────────────────────────────────────── */
 .shelf-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -143,7 +148,7 @@ main { padding: 10px; }
 @media (min-width: 1120px) { .shelf-grid { grid-template-columns: repeat(6, 1fr); } }
 
 
-/* ─── Album Card ──────────────────────────────────────────────────────────── */
+/* ─── Album card ──────────────────────────────────────────────────────────── */
 .album-card {
   position: relative;
   border-radius: var(--radius);
@@ -151,18 +156,24 @@ main { padding: 10px; }
   cursor: pointer;
   background: var(--surface);
   aspect-ratio: 1 / 1;
-  transition: transform 0.18s ease;
+  transition: transform 0.18s ease, opacity 0.18s ease;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   will-change: transform;
-  role: listitem;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 @media (hover: hover) {
   .album-card:hover { transform: scale(1.03); z-index: 1; }
-  .album-card:hover .remove-btn { opacity: 1; }
 }
-.album-card:active { transform: scale(0.94); }
+
+.album-card--pressing {
+  transform: scale(0.91) !important;
+  opacity: 0.8;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
 
 .album-art {
   width: 100%; height: 100%;
@@ -183,57 +194,6 @@ main { padding: 10px; }
   pointer-events: none;
 }
 
-.album-info {
-  position: absolute;
-  bottom: 0; left: 0; right: 0;
-  padding: 32px 8px 8px;
-  background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 100%);
-  pointer-events: none;
-}
-
-.album-title {
-  font-size: 0.72rem;
-  font-weight: 600;
-  line-height: 1.25;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: #fff;
-}
-
-.album-artist {
-  font-size: 0.62rem;
-  color: rgba(255,255,255,0.55);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-top: 2px;
-}
-
-.remove-btn {
-  position: absolute;
-  top: 6px; right: 6px;
-  width: 22px; height: 22px;
-  border-radius: 50%;
-  background: rgba(0,0,0,0.6);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border: none;
-  color: rgba(255,255,255,0.9);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  /* subtle on mobile so it doesn't clutter art, revealed on desktop hover */
-  opacity: 0.45;
-  transition: opacity 0.18s, background 0.18s, transform 0.1s;
-  z-index: 2;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
-}
-.remove-btn:hover  { opacity: 1; background: rgba(200,40,40,0.85); }
-.remove-btn:active { transform: scale(0.85); }
-
 
 /* ─── Empty state ─────────────────────────────────────────────────────────── */
 .empty-state {
@@ -252,13 +212,136 @@ main { padding: 10px; }
 .empty-sub   { font-size: 0.82rem; color: var(--text3); }
 
 
+/* ─── List view (vinyl & archive) ────────────────────────────────────────── */
+.list-view {
+  display: flex;
+  flex-direction: column;
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.list-row:last-child { border-bottom: none; }
+
+.list-thumb {
+  width: 50px; height: 50px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--surface2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.list-thumb img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.list-thumb--empty {
+  font-size: 1.3rem;
+  color: var(--text3);
+}
+
+.list-meta {
+  flex: 1;
+  min-width: 0;
+}
+.list-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.list-artist {
+  font-size: 0.78rem;
+  color: var(--text2);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.list-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.list-btn {
+  padding: 7px 13px;
+  border: none;
+  border-radius: 8px;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.12s, transform 0.1s;
+  white-space: nowrap;
+}
+.list-btn:hover  { background: #3a3a3c; }
+.list-btn:active { transform: scale(0.94); }
+.list-btn--danger {
+  background: rgba(255,69,58,0.12);
+  color: rgb(255,69,58);
+}
+.list-btn--danger:hover { background: rgba(255,69,58,0.22); }
+
+
+/* ─── Bottom nav ──────────────────────────────────────────────────────────── */
+.tab-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0; right: 0;
+  z-index: 30;
+  height: calc(var(--nav-h) + var(--safe-b));
+  background: rgba(13,13,13,0.92);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: flex-start;
+  padding-top: 2px;
+  padding-bottom: var(--safe-b);
+}
+
+.tab-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 0;
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s;
+}
+.tab-btn:active { opacity: 0.6; }
+.tab-btn--active { color: var(--accent); }
+
+
 /* ─── Overlay ─────────────────────────────────────────────────────────────── */
 .overlay {
   position: fixed; inset: 0;
   background: rgba(0,0,0,0.55);
   z-index: 100;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.25s ease;
@@ -266,93 +349,111 @@ main { padding: 10px; }
 .overlay.visible { opacity: 1; pointer-events: all; }
 
 
-/* ─── Confirm Dialog ──────────────────────────────────────────────────────── */
-.confirm-dialog {
+/* ─── Context menu ────────────────────────────────────────────────────────── */
+.context-menu {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: 110;
+  display: flex;
+  align-items: flex-end;
+  pointer-events: none;
+}
+.context-menu[hidden] { display: none !important; }
+
+.context-sheet {
+  background: #1c1c1e;
+  border-radius: 20px 20px 0 0;
+  width: 100%;
+  pointer-events: all;
+  padding-bottom: calc(16px + var(--safe-b));
+  transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.context-menu.open .context-sheet { transform: translateY(0); }
+
+.context-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 20px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.context-art-wrap {
+  width: 54px; height: 54px;
+  border-radius: 7px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--surface2);
   display: flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
 }
-.confirm-dialog[hidden] { display: none !important; }
-
-.confirm-dialog > p,
-.confirm-dialog > .confirm-actions {
-  pointer-events: all;
+.context-art {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
 }
-
-.confirm-dialog::before {
-  content: '';
-  display: none;
+.context-no-art {
+  font-size: 1.4rem;
+  color: var(--text3);
 }
 
-/* Card that holds the message + buttons */
-.confirm-dialog {
-  flex-direction: column;
-  gap: 0;
+.context-meta { flex: 1; min-width: 0; }
+.context-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.context-artist {
+  font-size: 0.82rem;
+  color: var(--text2);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Re-use a wrapper approach — the dialog itself IS the card */
-.confirm-dialog {
-  inset: unset;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -44%) scale(0.95);
-  opacity: 0;
-  transition: transform 0.22s ease, opacity 0.22s ease;
-  width: min(320px, calc(100vw - 40px));
-  background: #2c2c2e;
-  border-radius: 16px;
-  padding: 24px 20px 18px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-  pointer-events: all;
-}
-.confirm-dialog.open {
-  transform: translate(-50%, -50%) scale(1);
-  opacity: 1;
-}
+.context-actions { padding: 0; }
 
-#confirmMsg {
+.context-btn {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 17px 20px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
   font-size: 0.95rem;
   font-weight: 500;
-  line-height: 1.45;
-  color: var(--text);
-  text-align: center;
-  margin-bottom: 20px;
-}
-
-.confirm-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.confirm-btn {
-  flex: 1;
-  padding: 12px;
-  border: none;
-  border-radius: 10px;
-  font-size: 0.9rem;
-  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s, transform 0.1s;
+  text-align: left;
   -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
+  transition: background 0.12s;
 }
-.confirm-btn:active { transform: scale(0.96); }
+.context-btn:last-child { border-bottom: none; }
+.context-btn:active     { background: var(--surface2); }
+.context-btn--danger    { color: rgb(255,69,58); }
+.context-btn--active    { color: var(--accent); }
 
-.confirm-btn--cancel {
-  background: var(--surface2);
-  color: var(--text);
+@media (min-width: 600px) {
+  .context-menu { align-items: center; justify-content: center; }
+  .context-sheet {
+    border-radius: 18px;
+    max-width: 380px;
+    width: calc(100% - 40px);
+    padding-bottom: 8px;
+    transform: scale(0.95);
+    opacity: 0;
+    transition: transform 0.22s ease, opacity 0.22s ease;
+  }
+  .context-menu.open .context-sheet { transform: scale(1); opacity: 1; }
 }
-.confirm-btn--cancel:hover { background: #3a3a3c; }
-
-.confirm-btn--ok {
-  background: rgba(255,69,58,0.85);
-  color: #fff;
-}
-.confirm-btn--ok:hover { background: rgb(255,69,58); }
 
 
 /* ─── Modal ───────────────────────────────────────────────────────────────── */
@@ -464,9 +565,7 @@ main { padding: 10px; }
 }
 .art-hint { font-size: 0.66rem; opacity: 0.65; }
 
-.art-url-input {
-  width: 100%;
-}
+.art-url-input { width: 100%; }
 
 
 /* ─── Form fields ─────────────────────────────────────────────────────────── */
