@@ -1,5 +1,5 @@
-// Shelflife service worker — cache-first for app shell, network-first for external images
-const CACHE = 'shelflife-v2';
+// LPQ service worker — cache-first for app shell, network-first for external images
+const CACHE = 'lpq-v1';
 const SHELL = [
   './',
   './index.html',

@@ -1,6 +1,6 @@
 {
-  "name": "Shelflife",
-  "short_name": "Shelflife",
+  "name": "LPQ",
+  "short_name": "LPQ",
   "description": "Your personal album rotation tracker",
   "start_url": "./index.html",
   "scope": "./",

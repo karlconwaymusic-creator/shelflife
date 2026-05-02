@@ -2,7 +2,6 @@
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
-let deferredInstall = null;
 let pendingArt = null;       // { value: string } — data URL wins over artUrl field
 let pendingRemoveId = null;  // id of album awaiting confirm-remove
 
@@ -15,12 +14,10 @@ const $empty          = document.getElementById('emptyState');
 const $modal          = document.getElementById('modal');
 const $overlay        = document.getElementById('overlay');
 const $addBtn         = document.getElementById('addBtn');
-const $shelfFullMsg   = document.getElementById('shelfFullMsg');
 const $closeBtn       = document.getElementById('closeModal');
 const $confirmDialog  = document.getElementById('confirmDialog');
 const $confirmOk      = document.getElementById('confirmOk');
 const $confirmCancel  = document.getElementById('confirmCancel');
-const $instBtn  = document.getElementById('installBtn');
 const $form     = document.getElementById('albumForm');
 const $artDrop  = document.getElementById('artDrop');
 const $artFile  = document.getElementById('artFile');
@@ -33,8 +30,14 @@ const $spotify  = document.getElementById('spotifyUrl');
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 (function init() {
-  try { albums = JSON.parse(localStorage.getItem('shelflife') || '[]'); }
-  catch { albums = []; }
+  try {
+    const legacy = localStorage.getItem('shelflife');
+    if (legacy !== null) {
+      localStorage.setItem('lpq', legacy);
+      localStorage.removeItem('shelflife');
+    }
+    albums = JSON.parse(localStorage.getItem('lpq') || '[]');
+  } catch { albums = []; }
 
   render();
   bindEvents();
@@ -45,8 +48,24 @@ const $spotify  = document.getElementById('spotifyUrl');
 })();
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
+// ─── Toast ────────────────────────────────────────────────────────────────────
+let toastTimer = null;
+function showToast(msg) {
+  let $t = document.getElementById('toast');
+  if (!$t) {
+    $t = document.createElement('div');
+    $t.id = 'toast';
+    $t.className = 'toast toast--hidden';
+    document.body.appendChild($t);
+  }
+  $t.textContent = msg;
+  clearTimeout(toastTimer);
+  $t.classList.remove('toast--hidden');
+  toastTimer = setTimeout(() => $t.classList.add('toast--hidden'), 3000);
+}
+
 function save() {
-  try { localStorage.setItem('shelflife', JSON.stringify(albums)); }
+  try { localStorage.setItem('lpq', JSON.stringify(albums)); }
   catch (e) {
     // LocalStorage quota exceeded — happens when many high-res covers stored as base64.
     // Notify user and still keep in-memory state intact.
@@ -61,9 +80,8 @@ function render() {
   $empty.style.display = albums.length ? 'none' : 'flex';
 
   const isFull = albums.length >= MAX_ALBUMS;
-  $addBtn.disabled = isFull;
-  $addBtn.setAttribute('aria-disabled', isFull);
-  $shelfFullMsg.hidden = !isFull;
+  $addBtn.disabled = false;
+  $addBtn.removeAttribute('aria-disabled');
 
   for (const a of albums) {
     const card = document.createElement('div');
@@ -152,28 +170,15 @@ function bindEvents() {
   });
 
   // ── Modal open / close ────────────────────────────────────────────────────
-  $addBtn.addEventListener('click', openModal);
+  $addBtn.addEventListener('click', () => {
+    if (albums.length >= MAX_ALBUMS) { showToast('Your shelf is full — remove an album to make room.'); return; }
+    openModal();
+  });
   $closeBtn.addEventListener('click', closeModal);
   $overlay.addEventListener('click', closeModal);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
-  // ── PWA install prompt ────────────────────────────────────────────────────
-  window.addEventListener('beforeinstallprompt', e => {
-    e.preventDefault();
-    deferredInstall = e;
-    $instBtn.hidden = false;
-  });
-  $instBtn.addEventListener('click', () => {
-    if (!deferredInstall) return;
-    deferredInstall.prompt();
-    deferredInstall.userChoice.then(() => {
-      $instBtn.hidden = true;
-      deferredInstall = null;
-    });
-  });
-  window.addEventListener('appinstalled', () => { $instBtn.hidden = true; });
-
-  // ── Art drop zone ─────────────────────────────────────────────────────────
+// ── Art drop zone ─────────────────────────────────────────────────────────
   $artDrop.addEventListener('click', () => $artFile.click());
   $artDrop.addEventListener('keydown', e => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $artFile.click(); }
