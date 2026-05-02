@@ -167,38 +167,29 @@
 
       <form id="albumForm" novalidate>
 
-        <div class="art-section">
-          <div id="artDrop" class="art-drop" tabindex="0" role="button" aria-label="Click to upload album art, or drag and drop an image">
-            <img id="artImg" class="art-preview-img" alt="Album art preview" hidden>
-            <div id="artPlaceholder" class="art-placeholder">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
-                <polyline points="21 15 16 10 5 21"/>
-              </svg>
-              <span>Upload art</span>
-              <span class="art-hint">tap, drag, or paste</span>
-            </div>
-            <input type="file" id="artFile" accept="image/*" class="visually-hidden" tabindex="-1">
-          </div>
-          <input type="url" id="artUrl" class="input art-url-input" placeholder="Or paste an image URL…" autocomplete="off" inputmode="url">
+        <div class="field-group">
+          <label class="label" for="spotifyInput">Spotify Album URL</label>
+          <input type="url" id="spotifyInput" class="input" placeholder="https://open.spotify.com/album/…" autocomplete="off" inputmode="url" autocorrect="off" spellcheck="false">
         </div>
 
-        <div class="fields">
-          <div class="field-group">
-            <label class="label" for="albumTitle">Album <span class="req">*</span></label>
-            <input type="text" id="albumTitle" class="input" placeholder="Kind of Blue" autocomplete="off" autocorrect="off" spellcheck="false">
-          </div>
-          <div class="field-group">
-            <label class="label" for="artistName">Artist <span class="req">*</span></label>
-            <input type="text" id="artistName" class="input" placeholder="Miles Davis" autocomplete="off" autocorrect="off" spellcheck="false">
-          </div>
-          <div class="field-group">
-            <label class="label" for="spotifyUrl">Spotify URL <span class="opt">optional</span></label>
-            <input type="url" id="spotifyUrl" class="input" placeholder="https://open.spotify.com/album/…" autocomplete="off" inputmode="url">
+        <div id="fetchLoading" class="fetch-status" hidden>
+          <svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+          </svg>
+          Looking up album…
+        </div>
+
+        <div id="fetchError" class="fetch-error" hidden></div>
+
+        <div id="albumPreview" class="album-preview" hidden>
+          <img id="previewArt" class="preview-art" alt="">
+          <div class="preview-meta">
+            <div id="previewTitle" class="preview-title"></div>
+            <div id="previewArtist" class="preview-artist"></div>
           </div>
         </div>
 
-        <button type="submit" class="submit-btn">Add to Shelf</button>
+        <button type="submit" id="submitBtn" class="submit-btn" disabled>Add to Shelf</button>
 
       </form>
     </div>

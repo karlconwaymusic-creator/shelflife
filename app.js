@@ -2,41 +2,82 @@
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
-let pendingArt = null;
 let pendingContextId = null;
 let currentView = 'shelf';
+let fetchedAlbum = null;
 
 const MAX_ALBUMS = 20;
 
+// ─── Spotify ──────────────────────────────────────────────────────────────────
+const SP_ID     = '1978c65fadff4963ab3373a4f4be8afb';
+const SP_SECRET = '8b15acf967734155a7b658740551554d';
+let spToken  = null;
+let spExpiry = 0;
+
+async function getSpotifyToken() {
+  if (spToken && Date.now() < spExpiry) return spToken;
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Basic ' + btoa(SP_ID + ':' + SP_SECRET),
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: 'grant_type=client_credentials',
+  });
+  if (!res.ok) throw new Error('Auth failed');
+  const data = await res.json();
+  spToken  = data.access_token;
+  spExpiry = Date.now() + (data.expires_in - 60) * 1000;
+  return spToken;
+}
+
+function extractAlbumId(url) {
+  try {
+    const parts = new URL(url).pathname.split('/').filter(Boolean);
+    const i = parts.indexOf('album');
+    if (i !== -1 && parts[i + 1]) return parts[i + 1].split('?')[0];
+  } catch {}
+  return null;
+}
+
+async function fetchSpotifyAlbum(albumId) {
+  const token = await getSpotifyToken();
+  const res = await fetch(`https://api.spotify.com/v1/albums/${albumId}`, {
+    headers: { 'Authorization': 'Bearer ' + token },
+  });
+  if (!res.ok) throw new Error('Album not found');
+  return res.json();
+}
+
 // ─── DOM ──────────────────────────────────────────────────────────────────────
-const $shelf        = document.getElementById('shelf');
-const $empty        = document.getElementById('emptyState');
-const $vinylList    = document.getElementById('vinylList');
-const $vinylEmpty   = document.getElementById('vinylEmpty');
-const $archiveList  = document.getElementById('archiveList');
-const $archiveEmpty = document.getElementById('archiveEmpty');
-const $modal        = document.getElementById('modal');
-const $overlay      = document.getElementById('overlay');
-const $addBtn       = document.getElementById('addBtn');
-const $closeBtn     = document.getElementById('closeModal');
-const $form         = document.getElementById('albumForm');
-const $artDrop      = document.getElementById('artDrop');
-const $artFile      = document.getElementById('artFile');
-const $artImg       = document.getElementById('artImg');
-const $artPh        = document.getElementById('artPlaceholder');
-const $artUrl       = document.getElementById('artUrl');
-const $title        = document.getElementById('albumTitle');
-const $artist       = document.getElementById('artistName');
-const $spotify      = document.getElementById('spotifyUrl');
-const $contextMenu  = document.getElementById('contextMenu');
-const $ctxArtImg    = document.getElementById('contextArtImg');
-const $ctxNoArt     = document.getElementById('contextNoArt');
-const $ctxTitle     = document.getElementById('contextTitle');
-const $ctxArtist    = document.getElementById('contextArtist');
-const $ctxVinyl     = document.getElementById('ctxVinyl');
-const $ctxVinylLbl  = document.getElementById('ctxVinylLabel');
-const $ctxArchive   = document.getElementById('ctxArchive');
-const $ctxRemove    = document.getElementById('ctxRemove');
+const $shelf         = document.getElementById('shelf');
+const $empty         = document.getElementById('emptyState');
+const $vinylList     = document.getElementById('vinylList');
+const $vinylEmpty    = document.getElementById('vinylEmpty');
+const $archiveList   = document.getElementById('archiveList');
+const $archiveEmpty  = document.getElementById('archiveEmpty');
+const $modal         = document.getElementById('modal');
+const $overlay       = document.getElementById('overlay');
+const $addBtn        = document.getElementById('addBtn');
+const $closeBtn      = document.getElementById('closeModal');
+const $form          = document.getElementById('albumForm');
+const $spotifyInput  = document.getElementById('spotifyInput');
+const $fetchLoading  = document.getElementById('fetchLoading');
+const $fetchError    = document.getElementById('fetchError');
+const $albumPreview  = document.getElementById('albumPreview');
+const $previewArt    = document.getElementById('previewArt');
+const $previewTitle  = document.getElementById('previewTitle');
+const $previewArtist = document.getElementById('previewArtist');
+const $submitBtn     = document.getElementById('submitBtn');
+const $contextMenu   = document.getElementById('contextMenu');
+const $ctxArtImg     = document.getElementById('contextArtImg');
+const $ctxNoArt      = document.getElementById('contextNoArt');
+const $ctxTitle      = document.getElementById('contextTitle');
+const $ctxArtist     = document.getElementById('contextArtist');
+const $ctxVinyl      = document.getElementById('ctxVinyl');
+const $ctxVinylLbl   = document.getElementById('ctxVinylLabel');
+const $ctxArchive    = document.getElementById('ctxArchive');
+const $ctxRemove     = document.getElementById('ctxRemove');
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 (function init() {
@@ -77,8 +118,6 @@ function showToast(msg) {
 function save() {
   try { localStorage.setItem('lpq', JSON.stringify(albums)); }
   catch (e) {
-    // LocalStorage quota exceeded — happens when many high-res covers stored as base64.
-    // Notify user and still keep in-memory state intact.
     console.warn('Storage full:', e);
     alert('Storage is getting full. Try using image URLs instead of uploading files to save space.');
   }
@@ -184,7 +223,6 @@ function makeListRow(a, actions) {
   return row;
 }
 
-// Minimal HTML escape — only used for inserting user strings into innerHTML
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])
@@ -350,7 +388,7 @@ function bindEvents() {
 
   // ── Overlay closes whatever is open ──────────────────────────────────────
   $overlay.addEventListener('click', () => {
-    if (!$modal.hidden)       closeModal();
+    if (!$modal.hidden)            closeModal();
     else if (!$contextMenu.hidden) closeContextMenu();
   });
 
@@ -369,56 +407,42 @@ function bindEvents() {
     else if (!$contextMenu.hidden) closeContextMenu();
   });
 
-  // ── Art drop zone ─────────────────────────────────────────────────────────
-  $artDrop.addEventListener('click', () => $artFile.click());
-  $artDrop.addEventListener('keydown', e => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $artFile.click(); }
-  });
-  $artFile.addEventListener('change', e => {
-    if (e.target.files[0]) processFile(e.target.files[0]);
-  });
+  // ── Spotify URL input ─────────────────────────────────────────────────────
+  let lookupTimer;
+  $spotifyInput.addEventListener('input', () => {
+    clearTimeout(lookupTimer);
+    fetchedAlbum = null;
+    $submitBtn.disabled = true;
+    $albumPreview.hidden = true;
+    $fetchError.hidden = true;
+    $fetchLoading.hidden = true;
 
-  $artDrop.addEventListener('dragover', e => {
-    e.preventDefault();
-    $artDrop.classList.add('drag-over');
-  });
-  $artDrop.addEventListener('dragleave', e => {
-    if (!$artDrop.contains(e.relatedTarget)) $artDrop.classList.remove('drag-over');
-  });
-  $artDrop.addEventListener('drop', e => {
-    e.preventDefault();
-    $artDrop.classList.remove('drag-over');
-    const f = e.dataTransfer.files[0];
-    if (f?.type.startsWith('image/')) processFile(f);
-  });
+    const albumId = extractAlbumId($spotifyInput.value.trim());
+    if (!albumId) return;
 
-  // ── Paste image anywhere while modal is open ──────────────────────────────
-  document.addEventListener('paste', e => {
-    if ($modal.hidden) return;
-    for (const item of (e.clipboardData?.items ?? [])) {
-      if (item.type.startsWith('image/')) {
-        processFile(item.getAsFile());
-        return;
+    $fetchLoading.hidden = false;
+    lookupTimer = setTimeout(async () => {
+      try {
+        const data = await fetchSpotifyAlbum(albumId);
+        fetchedAlbum = {
+          title:      data.name,
+          artist:     data.artists.map(a => a.name).join(', '),
+          art:        data.images[0]?.url ?? null,
+          spotifyUrl: data.external_urls.spotify,
+        };
+        $previewArt.src             = fetchedAlbum.art || '';
+        $previewArt.hidden          = !fetchedAlbum.art;
+        $previewTitle.textContent   = fetchedAlbum.title;
+        $previewArtist.textContent  = fetchedAlbum.artist;
+        $fetchLoading.hidden        = true;
+        $albumPreview.hidden        = false;
+        $submitBtn.disabled         = false;
+      } catch {
+        $fetchLoading.hidden  = true;
+        $fetchError.textContent = 'Couldn\'t find that album — check the URL and try again.';
+        $fetchError.hidden    = false;
       }
-    }
-  });
-
-  // ── Art URL live preview ──────────────────────────────────────────────────
-  let urlTimer;
-  $artUrl.addEventListener('input', () => {
-    clearTimeout(urlTimer);
-    const url = $artUrl.value.trim();
-    if (!url) {
-      if (!pendingArt) clearArt();
-      return;
-    }
-    urlTimer = setTimeout(() => {
-      if (pendingArt) return;
-      const probe = new Image();
-      probe.onload  = () => showArt(url);
-      probe.onerror = () => {};
-      probe.src = url;
-    }, 600);
+    }, 400);
   });
 
   // ── Form submit ───────────────────────────────────────────────────────────
@@ -430,7 +454,7 @@ function openModal() {
   $modal.hidden = false;
   $overlay.classList.add('visible');
   requestAnimationFrame(() => requestAnimationFrame(() => $modal.classList.add('open')));
-  setTimeout(() => $title.focus(), 60);
+  setTimeout(() => $spotifyInput.focus(), 60);
 }
 
 function closeModal() {
@@ -444,84 +468,27 @@ function closeModal() {
 
 function resetForm() {
   $form.reset();
-  pendingArt = null;
-  clearArt();
-  $title.classList.remove('error');
-  $artist.classList.remove('error');
-}
-
-// ─── Art handling ─────────────────────────────────────────────────────────────
-async function processFile(file) {
-  try {
-    const dataUrl = await cropAndCompress(file, 400, 0.83);
-    pendingArt = { value: dataUrl };
-    showArt(dataUrl);
-    $artUrl.value = '';
-  } catch (err) {
-    console.error('Image processing error:', err);
-  }
-}
-
-function cropAndCompress(file, dim, quality) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = reject;
-    reader.onload = ({ target: { result } }) => {
-      const img = new Image();
-      img.onerror = reject;
-      img.onload = () => {
-        const s   = Math.min(img.width, img.height);
-        const sx  = (img.width  - s) / 2;
-        const sy  = (img.height - s) / 2;
-        const out = Math.min(s, dim);
-        const canvas = document.createElement('canvas');
-        canvas.width = canvas.height = out;
-        canvas.getContext('2d').drawImage(img, sx, sy, s, s, 0, 0, out, out);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
-      img.src = result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-function showArt(src) {
-  $artImg.src = src;
-  $artImg.hidden = false;
-  $artPh.hidden = true;
-  $artDrop.classList.add('has-art');
-}
-
-function clearArt() {
-  $artImg.src = '';
-  $artImg.hidden = true;
-  $artPh.hidden = false;
-  $artDrop.classList.remove('has-art');
+  fetchedAlbum         = null;
+  $albumPreview.hidden = true;
+  $fetchError.hidden   = true;
+  $fetchLoading.hidden = true;
+  $submitBtn.disabled  = true;
 }
 
 // ─── Submit ───────────────────────────────────────────────────────────────────
 function onSubmit(e) {
   e.preventDefault();
-
-  const title  = $title.value.trim();
-  const artist = $artist.value.trim();
-
-  $title.classList.toggle('error',  !title);
-  $artist.classList.toggle('error', !artist);
-  if (!title || !artist) return;
-
-  const artUrlVal = $artUrl.value.trim();
-  const art = pendingArt?.value ?? (artUrlVal || null);
+  if (!fetchedAlbum) return;
 
   const album = {
-    id:         uid(),
-    title,
-    artist,
-    art,
-    spotifyUrl: $spotify.value.trim() || null,
-    addedAt:    Date.now(),
-    vinyl:      false,
-    archived:   false,
+    id:        uid(),
+    title:     fetchedAlbum.title,
+    artist:    fetchedAlbum.artist,
+    art:       fetchedAlbum.art,
+    spotifyUrl: fetchedAlbum.spotifyUrl,
+    addedAt:   Date.now(),
+    vinyl:     false,
+    archived:  false,
   };
 
   albums.unshift(album);
@@ -533,7 +500,6 @@ function onSubmit(e) {
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
 // Convert a Spotify web URL or existing URI to the spotify: URI scheme.
-// https://open.spotify.com/album/4aawyAB9vmqN3uQ7FjRGTy → spotify:album:4aawyAB9vmqN3uQ7FjRGTy
 function toSpotifyUri(url) {
   if (!url) return url;
   if (url.startsWith('spotify:')) return url;
@@ -541,7 +507,7 @@ function toSpotifyUri(url) {
     const { pathname } = new URL(url);
     const parts = pathname.split('/').filter(Boolean);
     if (parts.length >= 2) return `spotify:${parts[0]}:${parts[1]}`;
-  } catch { /* not a valid URL, fall through */ }
+  } catch {}
   return url;
 }
 
