@@ -34,7 +34,7 @@ async function getSpotifyToken() {
 function extractAlbumId(url) {
   try {
     const parts = new URL(url).pathname.split('/').filter(Boolean);
-    const i = parts.indexOf('album');
+    const i = parts.findIndex(p => p === 'album' || p === 'prerelease');
     if (i !== -1 && parts[i + 1]) return parts[i + 1].split('?')[0];
   } catch {}
   return null;
