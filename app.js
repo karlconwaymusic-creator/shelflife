@@ -40,13 +40,36 @@ function extractAlbumId(url) {
   return null;
 }
 
-async function fetchSpotifyAlbum(albumId) {
-  const token = await getSpotifyToken();
-  const res = await fetch(`https://api.spotify.com/v1/albums/${albumId}`, {
-    headers: { 'Authorization': 'Bearer ' + token },
-  });
-  if (!res.ok) throw new Error('Album not found');
-  return res.json();
+async function fetchSpotifyAlbum(albumId, rawUrl) {
+  // Try the catalog API first — gives high-res art and full metadata
+  try {
+    const token = await getSpotifyToken();
+    const res = await fetch(`https://api.spotify.com/v1/albums/${albumId}`, {
+      headers: { 'Authorization': 'Bearer ' + token },
+    });
+    if (res.ok) {
+      const d = await res.json();
+      return {
+        title:      d.name,
+        artist:     d.artists.map(a => a.name).join(', '),
+        art:        d.images[0]?.url ?? null,
+        spotifyUrl: d.external_urls.spotify,
+      };
+    }
+  } catch {}
+
+  // Fall back to oEmbed — works for pre-releases not yet in the catalog
+  const oe = await fetch(
+    'https://open.spotify.com/oembed?url=' + encodeURIComponent(rawUrl)
+  );
+  if (!oe.ok) throw new Error('Album not found');
+  const d = await oe.json();
+  return {
+    title:      d.title,
+    artist:     d.author_name,
+    art:        d.thumbnail_url ?? null,
+    spotifyUrl: rawUrl.split('?')[0],
+  };
 }
 
 // ─── DOM ──────────────────────────────────────────────────────────────────────
@@ -417,23 +440,24 @@ function bindEvents() {
     $fetchError.hidden = true;
     $fetchLoading.hidden = true;
 
-    const albumId = extractAlbumId($spotifyInput.value.trim());
+    const rawUrl  = $spotifyInput.value.trim();
+    const albumId = extractAlbumId(rawUrl);
     if (!albumId) return;
 
     $fetchLoading.hidden = false;
     lookupTimer = setTimeout(async () => {
       try {
-        const data = await fetchSpotifyAlbum(albumId);
+        const data = await fetchSpotifyAlbum(albumId, rawUrl);
         fetchedAlbum = {
-          title:      data.name,
-          artist:     data.artists.map(a => a.name).join(', '),
-          art:        data.images[0]?.url ?? null,
-          spotifyUrl: data.external_urls.spotify,
+          title:      data.title,
+          artist:     data.artist,
+          art:        data.art,
+          spotifyUrl: data.spotifyUrl,
         };
-        $previewArt.src             = fetchedAlbum.art || '';
-        $previewArt.hidden          = !fetchedAlbum.art;
-        $previewTitle.textContent   = fetchedAlbum.title;
-        $previewArtist.textContent  = fetchedAlbum.artist;
+        $previewArt.src            = fetchedAlbum.art || '';
+        $previewArt.hidden         = !fetchedAlbum.art;
+        $previewTitle.textContent  = fetchedAlbum.title;
+        $previewArtist.textContent = fetchedAlbum.artist;
         $fetchLoading.hidden        = true;
         $albumPreview.hidden        = false;
         $submitBtn.disabled         = false;
