@@ -524,13 +524,17 @@ function onSubmit(e) {
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
 // Convert a Spotify web URL or existing URI to the spotify: URI scheme.
+// Pre-release URLs use /prerelease/ but map to the same album: URI type.
 function toSpotifyUri(url) {
   if (!url) return url;
   if (url.startsWith('spotify:')) return url;
   try {
     const { pathname } = new URL(url);
     const parts = pathname.split('/').filter(Boolean);
-    if (parts.length >= 2) return `spotify:${parts[0]}:${parts[1]}`;
+    if (parts.length >= 2) {
+      const type = parts[0] === 'prerelease' ? 'album' : parts[0];
+      return `spotify:${type}:${parts[1]}`;
+    }
   } catch {}
   return url;
 }
