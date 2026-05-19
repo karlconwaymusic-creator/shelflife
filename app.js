@@ -363,8 +363,8 @@ function openContextMenu(id) {
     $ctxArtImg.hidden = true;
     $ctxNoArt.hidden  = false;
   }
-  $ctxTitle.textContent    = a.title;
-  $ctxArtist.textContent   = a.artist;
+  $ctxTitle.textContent  = a.title;
+  $ctxArtist.textContent = a.artist + (a.year ? ` · ${a.year}` : '');
   $ctxVinylLbl.textContent = a.vinyl ? 'Remove from Vinyl' : 'Buy on Vinyl';
   $ctxVinyl.classList.toggle('context-btn--active', !!a.vinyl);
 
