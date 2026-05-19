@@ -27,22 +27,34 @@ function saveSettings() {
   localStorage.setItem('lpq-settings', JSON.stringify(settings));
 }
 
-// Silently fetch release years for albums that pre-date the year feature
+// Promote pre-release albums whose release date has now passed
+function checkPreReleases() {
+  const today = new Date().toISOString().slice(0, 10);
+  let changed = false;
+  for (const a of albums) {
+    if (a.preRelease && a.releaseDate && !isPreReleaseDate(a.releaseDate)) {
+      a.preRelease = false;
+      changed = true;
+    }
+  }
+  if (changed) save();
+}
+
+// Silently fetch release years / dates for albums that pre-date those features
 async function backfillYears() {
-  const needsYear = albums.filter(a => a.spotifyUrl && !a.year);
-  if (!needsYear.length) return;
-  for (const a of needsYear) {
+  const needsData = albums.filter(a => a.spotifyUrl && (!a.year || !a.releaseDate));
+  if (!needsData.length) return;
+  let changed = false;
+  for (const a of needsData) {
     try {
       const id = extractAlbumId(a.spotifyUrl);
       if (!id) continue;
       const data = await fetchSpotifyAlbum(id, a.spotifyUrl);
-      if (data.year) {
-        a.year = data.year;
-      }
+      if (data.year && !a.year)               { a.year = data.year;               changed = true; }
+      if (data.releaseDate && !a.releaseDate) { a.releaseDate = data.releaseDate; changed = true; }
     } catch {}
   }
-  save();
-  render();
+  if (changed) { save(); render(); }
 }
 
 function applySettingsUI() {
@@ -94,11 +106,12 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
     if (res.ok) {
       const d = await res.json();
       return {
-        title:      d.name,
-        artist:     d.artists.map(a => a.name).join(', '),
-        art:        d.images[0]?.url ?? null,
-        spotifyUrl: d.external_urls.spotify,
-        year:       d.release_date ? d.release_date.slice(0, 4) : null,
+        title:       d.name,
+        artist:      d.artists.map(a => a.name).join(', '),
+        art:         d.images[0]?.url ?? null,
+        spotifyUrl:  d.external_urls.spotify,
+        year:        d.release_date ? d.release_date.slice(0, 4) : null,
+        releaseDate: d.release_date ?? null,
       };
     }
   } catch {}
@@ -142,6 +155,8 @@ const $settingArchive   = document.getElementById('settingArchive');
 const $settingShelfSize = document.getElementById('settingShelfSize');
 const $shelfSizeVal     = document.getElementById('shelfSizeVal');
 const $settingShopUrl   = document.getElementById('settingShopUrl');
+const $preReleaseGrid  = document.getElementById('preReleaseGrid');
+const $preReleaseEmpty = document.getElementById('preReleaseEmpty');
 const $contextMenu   = document.getElementById('contextMenu');
 const $ctxArtImg     = document.getElementById('contextArtImg');
 const $ctxNoArt      = document.getElementById('contextNoArt');
@@ -151,6 +166,7 @@ const $ctxVinyl      = document.getElementById('ctxVinyl');
 const $ctxVinylLbl   = document.getElementById('ctxVinylLabel');
 const $ctxArchive    = document.getElementById('ctxArchive');
 const $ctxRemove     = document.getElementById('ctxRemove');
+const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 (function init() {
@@ -165,6 +181,7 @@ const $ctxRemove     = document.getElementById('ctxRemove');
     albums = JSON.parse(localStorage.getItem('lpq') || '[]');
   } catch { albums = []; }
 
+  checkPreReleases();
   render();
   bindEvents();
   applySettingsUI();
@@ -205,10 +222,11 @@ function render() {
   renderShelf();
   renderVinyl();
   renderArchive();
+  renderPreRelease();
 }
 
 function renderShelf() {
-  const active = albums.filter(a => !a.archived);
+  const active = albums.filter(a => !a.archived && !a.preRelease);
   $shelf.innerHTML = '';
   $empty.style.display = active.length ? 'none' : 'flex';
 
@@ -276,6 +294,44 @@ function renderArchive() {
   }
 }
 
+function renderPreRelease() {
+  const upcoming = albums.filter(a => a.preRelease && !a.archived);
+  $preReleaseGrid.innerHTML = '';
+  $preReleaseEmpty.style.display = upcoming.length ? 'none' : 'flex';
+
+  for (const a of upcoming) {
+    const card = document.createElement('div');
+    card.className = 'album-card';
+    card.dataset.id = a.id;
+    card.setAttribute('role', 'listitem');
+    card.setAttribute('aria-label', `${a.title} by ${a.artist}, releasing ${a.releaseDate ?? 'soon'}`);
+
+    if (a.art) {
+      const img = document.createElement('img');
+      img.className = 'album-art';
+      img.src = a.art;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      card.appendChild(img);
+    } else {
+      const noArt = document.createElement('div');
+      noArt.className = 'album-no-art';
+      noArt.textContent = '♪';
+      card.appendChild(noArt);
+    }
+
+    if (a.releaseDate) {
+      const badge = document.createElement('div');
+      badge.className = 'album-card__date';
+      badge.textContent = formatReleaseDate(a.releaseDate);
+      card.appendChild(badge);
+    }
+
+    $preReleaseGrid.appendChild(card);
+  }
+}
+
 function makeListRow(a, actions) {
   const row = document.createElement('div');
   row.className = 'list-row';
@@ -337,7 +393,7 @@ function archiveAlbum(id) {
 }
 
 function restoreAlbum(id) {
-  const active = albums.filter(a => !a.archived);
+  const active = albums.filter(a => !a.archived && !a.preRelease);
   if (active.length >= settings.shelfSize) {
     showToast('Your shelf is full — remove an album to make room.');
     return;
@@ -386,6 +442,7 @@ function openContextMenu(id) {
   $ctxArtist.textContent = a.artist + (a.year ? ` · ${a.year}` : '');
   $ctxVinylLbl.textContent = a.vinyl ? 'Remove from Vinyl' : 'Buy on Vinyl';
   $ctxVinyl.classList.toggle('context-btn--active', !!a.vinyl);
+  $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
 
   $contextMenu.hidden = false;
   $overlay.classList.add('visible');
@@ -452,6 +509,39 @@ function bindEvents() {
     if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
   });
 
+  // ── Long press on pre-release grid (mirrors shelf) ───────────────────────
+  $preReleaseGrid.addEventListener('pointerdown', e => {
+    const card = e.target.closest('.album-card');
+    if (!card) return;
+    lpFired = false;
+    lpCard  = card;
+    lpStart = { x: e.clientX, y: e.clientY };
+    card.classList.add('album-card--pressing');
+    lpTimer = setTimeout(() => {
+      lpFired = true;
+      card.classList.remove('album-card--pressing');
+      navigator.vibrate?.(12);
+      openContextMenu(card.dataset.id);
+    }, 450);
+  });
+
+  $preReleaseGrid.addEventListener('pointermove', e => {
+    if (!lpStart) return;
+    if (Math.abs(e.clientX - lpStart.x) > 8 || Math.abs(e.clientY - lpStart.y) > 8) cancelLp();
+  });
+
+  $preReleaseGrid.addEventListener('pointerup',     cancelLp);
+  $preReleaseGrid.addEventListener('pointercancel', cancelLp);
+  $preReleaseGrid.addEventListener('contextmenu',   e => e.preventDefault());
+
+  $preReleaseGrid.addEventListener('click', e => {
+    if (lpFired) { lpFired = false; return; }
+    const card = e.target.closest('.album-card');
+    if (!card) return;
+    const a = albums.find(a => a.id === card.dataset.id);
+    if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
+  });
+
   // ── Context menu actions ──────────────────────────────────────────────────
   $ctxVinyl.addEventListener('click', () => {
     const id = pendingContextId;
@@ -493,7 +583,7 @@ function bindEvents() {
 
   // ── Modal open / close ────────────────────────────────────────────────────
   $addBtn.addEventListener('click', () => {
-    if (albums.filter(a => !a.archived).length >= settings.shelfSize) {
+    if (albums.filter(a => !a.archived && !a.preRelease).length >= settings.shelfSize) {
       showToast('Your shelf is full — remove an album to make room.');
       return;
     }
@@ -546,19 +636,25 @@ function bindEvents() {
       try {
         const data = await fetchSpotifyAlbum(albumId, rawUrl);
         fetchedAlbum = {
-          title:      data.title,
-          artist:     data.artist,
-          art:        data.art,
-          spotifyUrl: data.spotifyUrl,
-          year:       data.year,
+          title:       data.title,
+          artist:      data.artist,
+          art:         data.art,
+          spotifyUrl:  data.spotifyUrl,
+          year:        data.year,
+          releaseDate: data.releaseDate ?? null,
         };
         $previewArt.src            = fetchedAlbum.art || '';
         $previewArt.hidden         = !fetchedAlbum.art;
         $previewTitle.textContent  = fetchedAlbum.title;
-        $previewArtist.textContent = fetchedAlbum.artist;
+        const isPre = isPreReleaseDate(fetchedAlbum.releaseDate);
+        $previewArtist.textContent = fetchedAlbum.artist +
+          (isPre && fetchedAlbum.releaseDate
+            ? ` · Out ${formatReleaseDate(fetchedAlbum.releaseDate)}`
+            : (fetchedAlbum.year ? ` · ${fetchedAlbum.year}` : ''));
         $fetchLoading.hidden        = true;
         $albumPreview.hidden        = false;
         $submitBtn.disabled         = false;
+        $submitBtn.textContent      = isPre ? 'Add to Upcoming' : 'Add to Shelf';
       } catch {
         $fetchLoading.hidden  = true;
         $fetchError.textContent = 'Couldn\'t find that album — check the URL and try again.';
@@ -594,7 +690,8 @@ function resetForm() {
   $albumPreview.hidden = true;
   $fetchError.hidden   = true;
   $fetchLoading.hidden = true;
-  $submitBtn.disabled  = true;
+  $submitBtn.disabled    = true;
+  $submitBtn.textContent = 'Add to Shelf';
 }
 
 // ─── Submit ───────────────────────────────────────────────────────────────────
@@ -602,16 +699,19 @@ function onSubmit(e) {
   e.preventDefault();
   if (!fetchedAlbum) return;
 
+  const isPre = isPreReleaseDate(fetchedAlbum.releaseDate);
   const album = {
-    id:        uid(),
-    title:     fetchedAlbum.title,
-    artist:    fetchedAlbum.artist,
-    art:        fetchedAlbum.art,
-    spotifyUrl: fetchedAlbum.spotifyUrl,
-    year:       fetchedAlbum.year ?? null,
-    addedAt:    Date.now(),
-    vinyl:      false,
-    archived:   false,
+    id:          uid(),
+    title:       fetchedAlbum.title,
+    artist:      fetchedAlbum.artist,
+    art:         fetchedAlbum.art,
+    spotifyUrl:  fetchedAlbum.spotifyUrl,
+    year:        fetchedAlbum.year ?? null,
+    releaseDate: fetchedAlbum.releaseDate ?? null,
+    addedAt:     Date.now(),
+    vinyl:       false,
+    archived:    false,
+    preRelease:  isPre,
   };
 
   albums.unshift(album);
@@ -636,6 +736,30 @@ function toSpotifyUri(url) {
     }
   } catch {}
   return url;
+}
+
+// Returns true if the Spotify release_date string is still in the future
+function isPreReleaseDate(dateStr) {
+  if (!dateStr) return false;
+  const parts = dateStr.split('-');
+  // Year-only: pre-release only if it's a future year
+  if (parts.length === 1) return parseInt(parts[0]) > new Date().getFullYear();
+  // Full date or year-month: lexicographic compare works fine
+  return dateStr > new Date().toISOString().slice(0, 10);
+}
+
+// Format a Spotify release_date for display (e.g. "15 Jun 2025")
+function formatReleaseDate(dateStr) {
+  if (!dateStr) return '';
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    return `${parseInt(parts[2])} ${months[parseInt(parts[1]) - 1]} ${parts[0]}`;
+  }
+  if (parts.length === 2) {
+    return `${months[parseInt(parts[1]) - 1]} ${parts[0]}`;
+  }
+  return parts[0];
 }
 
 function uid() {

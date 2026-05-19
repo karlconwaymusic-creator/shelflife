@@ -195,6 +195,24 @@ main { padding: 0; }
 }
 
 
+/* ─── Pre-release date badge ──────────────────────────────────────────────── */
+.album-card__date {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 22px 7px 7px;
+  background: linear-gradient(to bottom, transparent, rgba(0,0,0,0.78));
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.92);
+  text-align: center;
+  pointer-events: none;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+
+
 /* ─── Empty state ─────────────────────────────────────────────────────────── */
 .empty-state {
   display: flex;
@@ -321,17 +339,24 @@ main { padding: 0; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 8px 0;
+  gap: 3px;
+  padding: 7px 2px;
   background: none;
   border: none;
   color: var(--text3);
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   transition: color 0.15s;
+  min-width: 0;
+}
+.tab-btn span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 .tab-btn:active { opacity: 0.6; }
 .tab-btn--active { color: var(--accent); }
