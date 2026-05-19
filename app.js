@@ -80,6 +80,7 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
         artist:     d.artists.map(a => a.name).join(', '),
         art:        d.images[0]?.url ?? null,
         spotifyUrl: d.external_urls.spotify,
+        year:       d.release_date ? d.release_date.slice(0, 4) : null,
       };
     }
   } catch {}
@@ -95,6 +96,7 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
     artist:     d.author_name,
     art:        d.thumbnail_url ?? null,
     spotifyUrl: rawUrl.split('?')[0],
+    year:       null,
   };
 }
 
@@ -242,10 +244,16 @@ function renderArchive() {
   $archiveEmpty.style.display = archived.length ? 'none' : 'flex';
 
   for (const a of archived) {
-    $archiveList.appendChild(makeListRow(a, [
+    const row = makeListRow(a, [
       { label: 'Restore', action() { restoreAlbum(a.id); } },
       { label: 'Delete',  danger: true, action() { deleteAlbum(a.id); } },
-    ]));
+    ]);
+    if (a.spotifyUrl) {
+      const thumb = row.querySelector('.list-thumb');
+      thumb.classList.add('list-thumb--link');
+      thumb.addEventListener('click', () => window.location.href = toSpotifyUri(a.spotifyUrl));
+    }
+    $archiveList.appendChild(row);
   }
 }
 
@@ -268,9 +276,10 @@ function makeListRow(a, actions) {
 
   const meta = document.createElement('div');
   meta.className = 'list-meta';
+  const sub = a.artist + (a.year ? ` · ${a.year}` : '');
   meta.innerHTML =
     `<div class="list-title">${esc(a.title)}</div>` +
-    `<div class="list-artist">${esc(a.artist)}</div>`;
+    `<div class="list-artist">${esc(sub)}</div>`;
 
   const actionsEl = document.createElement('div');
   actionsEl.className = 'list-actions';
@@ -522,6 +531,7 @@ function bindEvents() {
           artist:     data.artist,
           art:        data.art,
           spotifyUrl: data.spotifyUrl,
+          year:       data.year,
         };
         $previewArt.src            = fetchedAlbum.art || '';
         $previewArt.hidden         = !fetchedAlbum.art;
@@ -577,11 +587,12 @@ function onSubmit(e) {
     id:        uid(),
     title:     fetchedAlbum.title,
     artist:    fetchedAlbum.artist,
-    art:       fetchedAlbum.art,
+    art:        fetchedAlbum.art,
     spotifyUrl: fetchedAlbum.spotifyUrl,
-    addedAt:   Date.now(),
-    vinyl:     false,
-    archived:  false,
+    year:       fetchedAlbum.year ?? null,
+    addedAt:    Date.now(),
+    vinyl:      false,
+    archived:   false,
   };
 
   albums.unshift(album);

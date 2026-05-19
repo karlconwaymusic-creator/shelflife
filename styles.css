@@ -242,6 +242,8 @@ main { padding: 0; }
   object-fit: cover;
   display: block;
 }
+.list-thumb--link { cursor: pointer; }
+.list-thumb--link:active { opacity: 0.7; }
 .list-thumb--empty {
   font-size: 1.3rem;
   color: var(--text3);
