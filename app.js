@@ -27,6 +27,24 @@ function saveSettings() {
   localStorage.setItem('lpq-settings', JSON.stringify(settings));
 }
 
+// Silently fetch release years for albums that pre-date the year feature
+async function backfillYears() {
+  const needsYear = albums.filter(a => a.spotifyUrl && !a.year);
+  if (!needsYear.length) return;
+  for (const a of needsYear) {
+    try {
+      const id = extractAlbumId(a.spotifyUrl);
+      if (!id) continue;
+      const data = await fetchSpotifyAlbum(id, a.spotifyUrl);
+      if (data.year) {
+        a.year = data.year;
+      }
+    } catch {}
+  }
+  save();
+  render();
+}
+
 function applySettingsUI() {
   $settingArchive.checked    = settings.archiveOnRemove;
   $settingShelfSize.value    = settings.shelfSize;
@@ -150,6 +168,7 @@ const $ctxRemove     = document.getElementById('ctxRemove');
   render();
   bindEvents();
   applySettingsUI();
+  backfillYears();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
