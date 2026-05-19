@@ -32,7 +32,7 @@ function checkPreReleases() {
   const today = new Date().toISOString().slice(0, 10);
   let changed = false;
   for (const a of albums) {
-    if (a.preRelease && a.releaseDate && !isPreReleaseDate(a.releaseDate)) {
+    if (a.preRelease && !isPreRelease(a.releaseDate, a.spotifyUrl)) {
       a.preRelease = false;
       changed = true;
     }
@@ -123,11 +123,12 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
   if (!oe.ok) throw new Error('Album not found');
   const d = await oe.json();
   return {
-    title:      d.title,
-    artist:     d.author_name,
-    art:        d.thumbnail_url ?? null,
-    spotifyUrl: rawUrl.split('?')[0],
-    year:       null,
+    title:       d.title,
+    artist:      d.author_name || '',   // oEmbed omits author_name for prereleases
+    art:         d.thumbnail_url ?? null,
+    spotifyUrl:  rawUrl.split('?')[0],
+    year:        null,
+    releaseDate: null,
   };
 }
 
@@ -646,11 +647,11 @@ function bindEvents() {
         $previewArt.src            = fetchedAlbum.art || '';
         $previewArt.hidden         = !fetchedAlbum.art;
         $previewTitle.textContent  = fetchedAlbum.title;
-        const isPre = isPreReleaseDate(fetchedAlbum.releaseDate);
-        $previewArtist.textContent = fetchedAlbum.artist +
+        const isPre = isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl);
+        $previewArtist.textContent = (fetchedAlbum.artist || '') +
           (isPre && fetchedAlbum.releaseDate
-            ? ` · Out ${formatReleaseDate(fetchedAlbum.releaseDate)}`
-            : (fetchedAlbum.year ? ` · ${fetchedAlbum.year}` : ''));
+            ? `${fetchedAlbum.artist ? ' · ' : ''}Out ${formatReleaseDate(fetchedAlbum.releaseDate)}`
+            : (fetchedAlbum.year ? `${fetchedAlbum.artist ? ' · ' : ''}${fetchedAlbum.year}` : ''));
         $fetchLoading.hidden        = true;
         $albumPreview.hidden        = false;
         $submitBtn.disabled         = false;
@@ -699,7 +700,7 @@ function onSubmit(e) {
   e.preventDefault();
   if (!fetchedAlbum) return;
 
-  const isPre = isPreReleaseDate(fetchedAlbum.releaseDate);
+  const isPre = isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl);
   const album = {
     id:          uid(),
     title:       fetchedAlbum.title,
@@ -723,29 +724,31 @@ function onSubmit(e) {
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
 // Convert a Spotify web URL or existing URI to the spotify: URI scheme.
-// Pre-release URLs use /prerelease/ but map to the same album: URI type.
+// Prerelease URLs stay as https:// — spotify:album:ID doesn't work for
+// unreleased content; the https URL triggers universal links on mobile.
 function toSpotifyUri(url) {
   if (!url) return url;
   if (url.startsWith('spotify:')) return url;
+  if (url.includes('/prerelease/')) return url; // universal link, handled by Spotify app
   try {
     const { pathname } = new URL(url);
     const parts = pathname.split('/').filter(Boolean);
-    if (parts.length >= 2) {
-      const type = parts[0] === 'prerelease' ? 'album' : parts[0];
-      return `spotify:${type}:${parts[1]}`;
-    }
+    if (parts.length >= 2) return `spotify:${parts[0]}:${parts[1]}`;
   } catch {}
   return url;
 }
 
-// Returns true if the Spotify release_date string is still in the future
-function isPreReleaseDate(dateStr) {
-  if (!dateStr) return false;
-  const parts = dateStr.split('-');
+// Returns true if the album should live in the Pre-Releases section.
+// Checks release date (if known) OR the Spotify URL path (/prerelease/).
+function isPreRelease(releaseDate, spotifyUrl) {
+  // URL path is the most reliable signal for Spotify prerelease content
+  if (spotifyUrl && spotifyUrl.includes('/prerelease/')) return true;
+  if (!releaseDate) return false;
+  const parts = releaseDate.split('-');
   // Year-only: pre-release only if it's a future year
   if (parts.length === 1) return parseInt(parts[0]) > new Date().getFullYear();
   // Full date or year-month: lexicographic compare works fine
-  return dateStr > new Date().toISOString().slice(0, 10);
+  return releaseDate > new Date().toISOString().slice(0, 10);
 }
 
 // Format a Spotify release_date for display (e.g. "15 Jun 2025")
