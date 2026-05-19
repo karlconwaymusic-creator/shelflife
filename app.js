@@ -151,6 +151,8 @@ const $albumPreview  = document.getElementById('albumPreview');
 const $previewArt    = document.getElementById('previewArt');
 const $previewTitle  = document.getElementById('previewTitle');
 const $previewArtist = document.getElementById('previewArtist');
+const $artistField   = document.getElementById('artistField');
+const $artistInput   = document.getElementById('artistInput');
 const $submitBtn     = document.getElementById('submitBtn');
 const $settingArchive   = document.getElementById('settingArchive');
 const $settingShelfSize = document.getElementById('settingShelfSize');
@@ -648,14 +650,17 @@ function bindEvents() {
         $previewArt.hidden         = !fetchedAlbum.art;
         $previewTitle.textContent  = fetchedAlbum.title;
         const isPre = isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl);
+        const hasMeta = isPre && fetchedAlbum.releaseDate;
         $previewArtist.textContent = (fetchedAlbum.artist || '') +
-          (isPre && fetchedAlbum.releaseDate
-            ? `${fetchedAlbum.artist ? ' · ' : ''}Out ${formatReleaseDate(fetchedAlbum.releaseDate)}`
-            : (fetchedAlbum.year ? `${fetchedAlbum.artist ? ' · ' : ''}${fetchedAlbum.year}` : ''));
-        $fetchLoading.hidden        = true;
-        $albumPreview.hidden        = false;
-        $submitBtn.disabled         = false;
-        $submitBtn.textContent      = isPre ? 'Add to Upcoming' : 'Add to Shelf';
+          (hasMeta ? `${fetchedAlbum.artist ? ' · ' : ''}Out ${formatReleaseDate(fetchedAlbum.releaseDate)}`
+                   : (fetchedAlbum.year ? `${fetchedAlbum.artist ? ' · ' : ''}${fetchedAlbum.year}` : ''));
+        // Show manual artist field when the API couldn't provide one
+        $artistField.hidden  = !!fetchedAlbum.artist;
+        $artistInput.value   = '';
+        $fetchLoading.hidden  = true;
+        $albumPreview.hidden  = false;
+        $submitBtn.disabled   = false;
+        $submitBtn.textContent = isPre ? 'Add to Pre-Releases' : 'Add to Shelf';
       } catch {
         $fetchLoading.hidden  = true;
         $fetchError.textContent = 'Couldn\'t find that album — check the URL and try again.';
@@ -691,6 +696,8 @@ function resetForm() {
   $albumPreview.hidden = true;
   $fetchError.hidden   = true;
   $fetchLoading.hidden = true;
+  $artistField.hidden    = true;
+  $artistInput.value     = '';
   $submitBtn.disabled    = true;
   $submitBtn.textContent = 'Add to Shelf';
 }
@@ -701,10 +708,11 @@ function onSubmit(e) {
   if (!fetchedAlbum) return;
 
   const isPre = isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl);
+  const artist = fetchedAlbum.artist || $artistInput.value.trim();
   const album = {
     id:          uid(),
     title:       fetchedAlbum.title,
-    artist:      fetchedAlbum.artist,
+    artist:      artist,
     art:         fetchedAlbum.art,
     spotifyUrl:  fetchedAlbum.spotifyUrl,
     year:        fetchedAlbum.year ?? null,
