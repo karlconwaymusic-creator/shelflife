@@ -6,7 +6,33 @@ let pendingContextId = null;
 let currentView = 'shelf';
 let fetchedAlbum = null;
 
-const MAX_ALBUMS = 20;
+const MAX_ALBUMS = 20; // hard ceiling; user limit is settings.shelfSize
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+const SETTINGS_DEFAULTS = {
+  archiveOnRemove: true,
+  shelfSize:       12,
+  shopUrl:         'https://towerrecords.ie/search?q=',
+};
+let settings = { ...SETTINGS_DEFAULTS };
+
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('lpq-settings') || 'null');
+    if (saved) settings = { ...SETTINGS_DEFAULTS, ...saved };
+  } catch {}
+}
+
+function saveSettings() {
+  localStorage.setItem('lpq-settings', JSON.stringify(settings));
+}
+
+function applySettingsUI() {
+  $settingArchive.checked    = settings.archiveOnRemove;
+  $settingShelfSize.value    = settings.shelfSize;
+  $shelfSizeVal.textContent  = settings.shelfSize;
+  $settingShopUrl.value      = settings.shopUrl;
+}
 
 // ─── Spotify ──────────────────────────────────────────────────────────────────
 const SP_ID     = '1978c65fadff4963ab3373a4f4be8afb';
@@ -92,6 +118,10 @@ const $previewArt    = document.getElementById('previewArt');
 const $previewTitle  = document.getElementById('previewTitle');
 const $previewArtist = document.getElementById('previewArtist');
 const $submitBtn     = document.getElementById('submitBtn');
+const $settingArchive   = document.getElementById('settingArchive');
+const $settingShelfSize = document.getElementById('settingShelfSize');
+const $shelfSizeVal     = document.getElementById('shelfSizeVal');
+const $settingShopUrl   = document.getElementById('settingShopUrl');
 const $contextMenu   = document.getElementById('contextMenu');
 const $ctxArtImg     = document.getElementById('contextArtImg');
 const $ctxNoArt      = document.getElementById('contextNoArt');
@@ -104,6 +134,8 @@ const $ctxRemove     = document.getElementById('ctxRemove');
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 (function init() {
+  loadSettings();
+
   try {
     const legacy = localStorage.getItem('shelflife');
     if (legacy !== null) {
@@ -115,6 +147,7 @@ const $ctxRemove     = document.getElementById('ctxRemove');
 
   render();
   bindEvents();
+  applySettingsUI();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
@@ -191,7 +224,14 @@ function renderVinyl() {
 
   for (const a of vinyl) {
     $vinylList.appendChild(makeListRow(a, [
-      { label: 'Remove', action() { toggleVinyl(a.id); renderVinyl(); } }
+      {
+        label: 'Buy',
+        action() {
+          const base = settings.shopUrl || SETTINGS_DEFAULTS.shopUrl;
+          window.open(base + encodeURIComponent(a.artist + ' ' + a.title), '_blank');
+        },
+      },
+      { label: 'Remove', action() { toggleVinyl(a.id); renderVinyl(); } },
     ]));
   }
 }
@@ -270,7 +310,7 @@ function archiveAlbum(id) {
 
 function restoreAlbum(id) {
   const active = albums.filter(a => !a.archived);
-  if (active.length >= MAX_ALBUMS) {
+  if (active.length >= settings.shelfSize) {
     showToast('Your shelf is full — remove an album to make room.');
     return;
   }
@@ -406,7 +446,15 @@ function bindEvents() {
     const id = pendingContextId;
     if (!id) return;
     closeContextMenu();
-    setTimeout(() => { archiveAlbum(id); showToast('Removed from shelf'); }, 180);
+    setTimeout(() => {
+      if (settings.archiveOnRemove) {
+        archiveAlbum(id);
+        showToast('Moved to archive');
+      } else {
+        deleteAlbum(id);
+        showToast('Removed from shelf');
+      }
+    }, 180);
   });
 
   // ── Overlay closes whatever is open ──────────────────────────────────────
@@ -417,7 +465,7 @@ function bindEvents() {
 
   // ── Modal open / close ────────────────────────────────────────────────────
   $addBtn.addEventListener('click', () => {
-    if (albums.filter(a => !a.archived).length >= MAX_ALBUMS) {
+    if (albums.filter(a => !a.archived).length >= settings.shelfSize) {
       showToast('Your shelf is full — remove an album to make room.');
       return;
     }
@@ -428,6 +476,27 @@ function bindEvents() {
     if (e.key !== 'Escape') return;
     if (!$modal.hidden)            closeModal();
     else if (!$contextMenu.hidden) closeContextMenu();
+  });
+
+  // ── Settings ──────────────────────────────────────────────────────────────
+  $settingArchive.addEventListener('change', () => {
+    settings.archiveOnRemove = $settingArchive.checked;
+    saveSettings();
+  });
+
+  $settingShelfSize.addEventListener('input', () => {
+    settings.shelfSize = parseInt($settingShelfSize.value, 10);
+    $shelfSizeVal.textContent = settings.shelfSize;
+    saveSettings();
+  });
+
+  let shopUrlTimer;
+  $settingShopUrl.addEventListener('input', () => {
+    clearTimeout(shopUrlTimer);
+    shopUrlTimer = setTimeout(() => {
+      settings.shopUrl = $settingShopUrl.value.trim() || SETTINGS_DEFAULTS.shopUrl;
+      saveSettings();
+    }, 600);
   });
 
   // ── Spotify URL input ─────────────────────────────────────────────────────
