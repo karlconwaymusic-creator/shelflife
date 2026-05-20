@@ -760,7 +760,9 @@ function bindEvents() {
         $previewArt.src            = fetchedAlbum.art || '';
         $previewArt.hidden         = !fetchedAlbum.art;
         $previewTitle.textContent  = fetchedAlbum.title;
-        const isPre = isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl);
+        // If opened from the Pre-Releases tab, always treat as pre-release —
+        // oEmbed albums without a /prerelease/ URL or release date won't auto-detect.
+        const isPre = isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl) || currentView === 'prerelease';
         const hasMeta = isPre && fetchedAlbum.releaseDate;
         $previewArtist.textContent = (fetchedAlbum.artist || '') +
           (hasMeta ? `${fetchedAlbum.artist ? ' · ' : ''}Out ${formatReleaseDate(fetchedAlbum.releaseDate)}`
@@ -818,10 +820,10 @@ function onSubmit(e) {
   e.preventDefault();
   if (!fetchedAlbum) return;
 
-  const isPre = isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl);
+  // Mirror the same logic as the URL lookup — opening from Pre-Releases tab forces pre-release.
+  const isPre = isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl) || currentView === 'prerelease';
 
-  // Last-chance shelf-full check — catches the edge case where someone opens
-  // the modal from the Pre-Releases tab but pastes a URL for an already-released album.
+  // Shelf-full guard only applies to albums actually going onto the shelf.
   if (!isPre && albums.filter(a => !a.archived && !a.preRelease).length >= settings.shelfSize) {
     showToast(settings.shelfSize < 20
       ? 'Shelf full — raise the limit in Settings or remove an album'
