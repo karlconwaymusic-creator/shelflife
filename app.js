@@ -1,7 +1,5 @@
 'use strict';
 
-const _splashStart = Date.now(); // must be first — used to time the splash dismiss
-
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
 let pendingContextId = null;
@@ -230,18 +228,6 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
   bindEvents();
   applySettingsUI();
   backfillYears();
-
-  // Dismiss splash — keep it visible for at least 900 ms so the spin registers,
-  // then fade out. App is already fully interactive behind it.
-  const $splash = document.getElementById('splash');
-  if ($splash) {
-    const elapsed = Date.now() - _splashStart;
-    const wait    = Math.max(0, 900 - elapsed);
-    setTimeout(() => {
-      $splash.classList.add('splash--out');
-      $splash.addEventListener('transitionend', () => $splash.remove(), { once: true });
-    }, wait);
-  }
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
