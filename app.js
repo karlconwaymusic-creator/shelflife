@@ -42,7 +42,7 @@ function checkPreReleases() {
 
 // Silently fetch release years / dates for albums that pre-date those features
 async function backfillYears() {
-  const needsData = albums.filter(a => a.spotifyUrl && (!a.year || !a.releaseDate));
+  const needsData = albums.filter(a => a.spotifyUrl && (!a.year || !a.releaseDate || !a.label));
   if (!needsData.length) return;
   let changed = false;
   for (const a of needsData) {
@@ -52,6 +52,7 @@ async function backfillYears() {
       const data = await fetchSpotifyAlbum(id, a.spotifyUrl);
       if (data.year && !a.year)               { a.year = data.year;               changed = true; }
       if (data.releaseDate && !a.releaseDate) { a.releaseDate = data.releaseDate; changed = true; }
+      if (data.label && !a.label)             { a.label = data.label;             changed = true; }
     } catch {}
   }
   if (changed) { save(); render(); }
@@ -112,6 +113,7 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
         spotifyUrl:  d.external_urls.spotify,
         year:        d.release_date ? d.release_date.slice(0, 4) : null,
         releaseDate: d.release_date ?? null,
+        label:       d.label ?? null,
       };
     }
   } catch {}
@@ -129,6 +131,7 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
     spotifyUrl:  rawUrl.split('?')[0],
     year:        null,
     releaseDate: null,
+    label:       null,
   };
 }
 
@@ -165,6 +168,7 @@ const $ctxArtImg     = document.getElementById('contextArtImg');
 const $ctxNoArt      = document.getElementById('contextNoArt');
 const $ctxTitle      = document.getElementById('contextTitle');
 const $ctxArtist     = document.getElementById('contextArtist');
+const $ctxLabel      = document.getElementById('contextLabel');
 const $ctxVinyl      = document.getElementById('ctxVinyl');
 const $ctxVinylLbl   = document.getElementById('ctxVinylLabel');
 const $ctxArchive    = document.getElementById('ctxArchive');
@@ -443,6 +447,8 @@ function openContextMenu(id) {
   }
   $ctxTitle.textContent  = a.title;
   $ctxArtist.textContent = a.artist + (a.year ? ` · ${a.year}` : '');
+  $ctxLabel.textContent  = a.label || '';
+  $ctxLabel.hidden       = !a.label;
   $ctxVinylLbl.textContent = a.vinyl ? 'Remove from Vinyl' : 'Buy on Vinyl';
   $ctxVinyl.classList.toggle('context-btn--active', !!a.vinyl);
   $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
@@ -647,6 +653,7 @@ function bindEvents() {
           spotifyUrl:  data.spotifyUrl,
           year:        data.year,
           releaseDate: data.releaseDate ?? null,
+          label:       data.label ?? null,
         };
         $previewArt.src            = fetchedAlbum.art || '';
         $previewArt.hidden         = !fetchedAlbum.art;
@@ -719,6 +726,7 @@ function onSubmit(e) {
     spotifyUrl:  fetchedAlbum.spotifyUrl,
     year:        fetchedAlbum.year ?? null,
     releaseDate: fetchedAlbum.releaseDate ?? null,
+    label:       fetchedAlbum.label ?? null,
     addedAt:     Date.now(),
     vinyl:       false,
     archived:    false,

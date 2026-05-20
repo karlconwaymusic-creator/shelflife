@@ -444,6 +444,16 @@ main { padding: 0; }
   text-overflow: ellipsis;
 }
 
+.context-label {
+  font-size: 0.75rem;
+  color: var(--text3);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.01em;
+}
+
 .context-actions { padding: 0; }
 
 .context-btn {
