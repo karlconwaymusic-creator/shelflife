@@ -16,6 +16,41 @@
 </head>
 <body>
 
+  <!-- Splash screen — shown immediately, dismissed by JS once app is ready -->
+  <div id="splash" aria-hidden="true">
+    <svg id="splashVinyl" viewBox="0 0 180 180" width="180" height="180" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="sg" cx="38%" cy="35%" r="65%">
+          <stop offset="0%" stop-color="#252525"/>
+          <stop offset="100%" stop-color="#111111"/>
+        </radialGradient>
+      </defs>
+      <!-- Disc -->
+      <circle cx="90" cy="90" r="88" fill="url(#sg)"/>
+      <!-- Outer edge -->
+      <circle cx="90" cy="90" r="87.5" fill="none" stroke="#2e2e2e" stroke-width="1"/>
+      <!-- Groove rings -->
+      <circle cx="90" cy="90" r="83" fill="none" stroke="#222" stroke-width="0.8"/>
+      <circle cx="90" cy="90" r="78" fill="none" stroke="#222" stroke-width="0.7"/>
+      <circle cx="90" cy="90" r="73" fill="none" stroke="#222" stroke-width="0.7"/>
+      <circle cx="90" cy="90" r="68" fill="none" stroke="#222" stroke-width="0.7"/>
+      <circle cx="90" cy="90" r="63" fill="none" stroke="#222" stroke-width="0.7"/>
+      <circle cx="90" cy="90" r="58" fill="none" stroke="#222" stroke-width="0.7"/>
+      <circle cx="90" cy="90" r="53" fill="none" stroke="#222" stroke-width="0.7"/>
+      <circle cx="90" cy="90" r="48" fill="none" stroke="#222" stroke-width="0.7"/>
+      <circle cx="90" cy="90" r="43" fill="none" stroke="#222" stroke-width="0.6"/>
+      <!-- Inner clear zone -->
+      <circle cx="90" cy="90" r="38" fill="#111111"/>
+      <!-- Center label -->
+      <circle cx="90" cy="90" r="33" fill="#1db954"/>
+      <!-- Label detail rings -->
+      <circle cx="90" cy="90" r="29.5" fill="none" stroke="#19a347" stroke-width="0.9"/>
+      <circle cx="90" cy="90" r="26"   fill="none" stroke="#19a347" stroke-width="0.6"/>
+      <!-- Spindle hole -->
+      <circle cx="90" cy="90" r="4.5" fill="#0a0a0a"/>
+    </svg>
+  </div>
+
   <header>
     <div class="header-inner">
       <h1>
