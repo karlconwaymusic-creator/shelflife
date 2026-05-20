@@ -668,15 +668,9 @@ function bindEvents() {
   $ctxMoveToShelf.addEventListener('click', () => {
     const id = pendingContextId;
     if (!id) return;
-    const active = albums.filter(a => !a.archived && !a.preRelease);
-    if (active.length >= settings.shelfSize) {
-      showToast(settings.shelfSize < 20
-        ? 'Shelf full — raise the limit in Settings or remove an album'
-        : 'Shelf full — remove an album to make room');
-      return;
-    }
     const a = albums.find(a => a.id === id);
     if (!a) return;
+    // No shelf-size check — this reclassifies an existing album, not a new add
     a.preRelease = false;
     save();
     render();
