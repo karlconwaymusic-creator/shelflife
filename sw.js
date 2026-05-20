@@ -1,5 +1,5 @@
 // LPQ service worker — network-first for app shell, network-only for external images
-const CACHE = 'lpq-v7';
+const CACHE = 'lpq-v8';
 const SHELL = [
   './',
   './index.html',
@@ -25,6 +25,11 @@ self.addEventListener('activate', e => {
         keys.filter(k => k !== CACHE).map(k => caches.delete(k))
       ))
       .then(() => self.clients.claim())
+      .then(() => {
+        // Tell every open window to reload so it picks up the freshly cached files.
+        return self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+          .then(clients => clients.forEach(c => c.navigate(c.url)));
+      })
   );
 });
 
