@@ -218,14 +218,9 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
 
   // Migration: reset '' labels (incorrectly set by oEmbed fallback or rate-limited
   // fetches) so they're re-fetched from the catalog API this session.
-  // Also rescue any album that was wrongly demoted from Pre-Releases to the shelf
-  // (caused by checkPreReleases firing before a release date was known).
   let migrated = false;
   for (const a of albums) {
     if (a.label === '') { a.label = null; migrated = true; }
-    if (!a.preRelease && !a.archived && isPreRelease(a.releaseDate, a.spotifyUrl)) {
-      a.preRelease = true; migrated = true;
-    }
   }
   if (migrated) save();
 
