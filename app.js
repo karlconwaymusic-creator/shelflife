@@ -40,9 +40,15 @@ function checkPreReleases() {
   if (changed) save();
 }
 
-// Silently fetch release years / dates for albums that pre-date those features
+// Silently fetch release years / dates / labels for albums that pre-date those features.
+// Pre-release albums are skipped — oEmbed never returns label/year for unreleased content.
+// null label  = not yet tried;  '' label = tried, Spotify has none.
 async function backfillYears() {
-  const needsData = albums.filter(a => a.spotifyUrl && (!a.year || !a.releaseDate || !a.label));
+  const needsData = albums.filter(a =>
+    a.spotifyUrl &&
+    !a.spotifyUrl.includes('/prerelease/') &&
+    (!a.year || !a.releaseDate || a.label == null)
+  );
   if (!needsData.length) return;
   let changed = false;
   for (const a of needsData) {
@@ -52,8 +58,11 @@ async function backfillYears() {
       const data = await fetchSpotifyAlbum(id, a.spotifyUrl);
       if (data.year && !a.year)               { a.year = data.year;               changed = true; }
       if (data.releaseDate && !a.releaseDate) { a.releaseDate = data.releaseDate; changed = true; }
-      if (data.label && !a.label)             { a.label = data.label;             changed = true; }
-    } catch {}
+      // Always mark label as fetched ('' = confirmed no label; truthy = label found)
+      if (a.label == null) { a.label = data.label || ''; changed = true; }
+    } catch (err) {
+      console.warn('[LPQ] backfillYears failed for', a.title, err);
+    }
   }
   if (changed) { save(); render(); }
 }
@@ -446,23 +455,29 @@ function buildCtxSub(a) {
 
 // Fetch and cache the label for an album that's missing it, then update
 // the context menu subtitle live if it's still open for the same album.
+// null  = not yet fetched;  '' = fetched, Spotify has no label.
 async function fetchLabelForAlbum(a) {
   try {
     const id = extractAlbumId(a.spotifyUrl);
-    if (!id) return;
+    if (!id) { a.label = ''; save(); return; }
     const token = await getSpotifyToken();
     const res = await fetch(`https://api.spotify.com/v1/albums/${id}`, {
       headers: { 'Authorization': 'Bearer ' + token },
     });
-    if (!res.ok) return;
+    if (!res.ok) {
+      // On 404 mark as done so we stop retrying; on other errors leave null to retry
+      if (res.status === 404) { a.label = ''; save(); }
+      return;
+    }
     const d = await res.json();
-    if (!d.label) return;
-    a.label = d.label;
+    a.label = d.label || '';   // always mark as fetched
     save();
     if (pendingContextId === a.id) {
       $ctxArtist.textContent = buildCtxSub(a);
     }
-  } catch {}
+  } catch (err) {
+    console.warn('[LPQ] fetchLabelForAlbum error:', err);
+  }
 }
 
 function openContextMenu(id) {
@@ -484,8 +499,8 @@ function openContextMenu(id) {
   $ctxVinyl.classList.toggle('context-btn--active', !!a.vinyl);
   $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
 
-  // Fetch label on-demand if missing (catalog albums only)
-  if (!a.label && a.spotifyUrl && !a.spotifyUrl.includes('/prerelease/')) {
+  // Fetch label on-demand if not yet tried (null = untried; '' = no label in Spotify)
+  if (a.label == null && a.spotifyUrl && !a.spotifyUrl.includes('/prerelease/')) {
     fetchLabelForAlbum(a);
   }
 
