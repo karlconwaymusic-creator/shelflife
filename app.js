@@ -459,23 +459,31 @@ function buildCtxSub(a) {
 async function fetchLabelForAlbum(a) {
   try {
     const id = extractAlbumId(a.spotifyUrl);
-    if (!id) { a.label = ''; save(); return; }
-    const token = await getSpotifyToken();
+    if (!id) { a.label = ''; save(); showToast('⚠ No album ID found'); return; }
+    let token;
+    try {
+      token = await getSpotifyToken();
+    } catch (authErr) {
+      showToast('⚠ Spotify auth failed: ' + authErr.message);
+      return;
+    }
     const res = await fetch(`https://api.spotify.com/v1/albums/${id}`, {
       headers: { 'Authorization': 'Bearer ' + token },
     });
     if (!res.ok) {
-      // On 404 mark as done so we stop retrying; on other errors leave null to retry
+      showToast('⚠ API ' + res.status + ' for ' + a.title);
       if (res.status === 404) { a.label = ''; save(); }
       return;
     }
     const d = await res.json();
-    a.label = d.label || '';   // always mark as fetched
+    a.label = d.label || '';
     save();
+    showToast(d.label ? '✓ Label: ' + d.label : '— No label in Spotify for ' + a.title);
     if (pendingContextId === a.id) {
       $ctxArtist.textContent = buildCtxSub(a);
     }
   } catch (err) {
+    showToast('⚠ Label fetch error: ' + err.message);
     console.warn('[LPQ] fetchLabelForAlbum error:', err);
   }
 }
