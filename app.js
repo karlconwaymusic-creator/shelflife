@@ -445,8 +445,14 @@ function openContextMenu(id) {
     $ctxArtImg.hidden = true;
     $ctxNoArt.hidden  = false;
   }
-  $ctxTitle.textContent  = a.title;
-  $ctxArtist.textContent = a.artist + (a.year ? ` · ${a.year}` : '');
+  $ctxTitle.textContent = a.title;
+  let ctxSub = a.artist || '';
+  if (a.preRelease && a.releaseDate) {
+    ctxSub += (ctxSub ? ' · ' : '') + `Out ${formatReleaseDate(a.releaseDate)}`;
+  } else if (a.year) {
+    ctxSub += (ctxSub ? ' · ' : '') + a.year;
+  }
+  $ctxArtist.textContent = ctxSub;
   $ctxLabel.textContent  = a.label || '';
   $ctxLabel.hidden       = !a.label;
   $ctxVinylLbl.textContent = a.vinyl ? 'Remove from Vinyl' : 'Buy on Vinyl';
