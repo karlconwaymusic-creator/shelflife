@@ -1,5 +1,5 @@
 // LPQ service worker — network-first for app shell, network-only for external images
-const CACHE = 'lpq-v12';
+const CACHE = 'lpq-v13';
 const SHELL = [
   './',
   './index.html',
@@ -26,9 +26,10 @@ self.addEventListener('activate', e => {
       ))
       .then(() => self.clients.claim())
       .then(() => {
-        // Tell every open window to reload so it picks up the freshly cached files.
+        // Tell every open window to reload via postMessage — more reliable than
+        // client.navigate() on iOS Safari. The listener is inlined in index.html.
         return self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-          .then(clients => clients.forEach(c => c.navigate(c.url)));
+          .then(clients => clients.forEach(c => c.postMessage({ type: 'SW_RELOAD' })));
       })
   );
 });
