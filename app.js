@@ -587,7 +587,9 @@ function bindEvents() {
   // ── Modal open / close ────────────────────────────────────────────────────
   $addBtn.addEventListener('click', () => {
     if (albums.filter(a => !a.archived && !a.preRelease).length >= settings.shelfSize) {
-      showToast('Your shelf is full — remove an album to make room.');
+      showToast(settings.shelfSize < 20
+        ? 'Shelf full — raise the limit in Settings or remove an album'
+        : 'Shelf full — remove an album to make room');
       return;
     }
     openModal();
