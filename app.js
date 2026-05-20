@@ -472,7 +472,7 @@ function switchView(view) {
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('tab-btn--active', btn.dataset.view === view);
   });
-  $addBtn.style.display = view === 'shelf' ? '' : 'none';
+  $addBtn.style.display = (view === 'shelf' || view === 'prerelease') ? '' : 'none';
 }
 
 // ─── Context menu ─────────────────────────────────────────────────────────────
@@ -690,11 +690,15 @@ function bindEvents() {
 
   // ── Modal open / close ────────────────────────────────────────────────────
   $addBtn.addEventListener('click', () => {
-    if (albums.filter(a => !a.archived && !a.preRelease).length >= settings.shelfSize) {
-      showToast(settings.shelfSize < 20
-        ? 'Shelf full — raise the limit in Settings or remove an album'
-        : 'Shelf full — remove an album to make room');
-      return;
+    // On the pre-releases tab the shelf limit doesn't apply — pre-releases
+    // don't occupy a shelf slot, so always allow the modal to open.
+    if (currentView !== 'prerelease') {
+      if (albums.filter(a => !a.archived && !a.preRelease).length >= settings.shelfSize) {
+        showToast(settings.shelfSize < 20
+          ? 'Shelf full — raise the limit in Settings or remove an album'
+          : 'Shelf full — remove an album to make room');
+        return;
+      }
     }
     openModal();
   });
@@ -815,6 +819,15 @@ function onSubmit(e) {
   if (!fetchedAlbum) return;
 
   const isPre = isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl);
+
+  // Last-chance shelf-full check — catches the edge case where someone opens
+  // the modal from the Pre-Releases tab but pastes a URL for an already-released album.
+  if (!isPre && albums.filter(a => !a.archived && !a.preRelease).length >= settings.shelfSize) {
+    showToast(settings.shelfSize < 20
+      ? 'Shelf full — raise the limit in Settings or remove an album'
+      : 'Shelf full — remove an album to make room');
+    return;
+  }
   const artist = fetchedAlbum.artist || $artistInput.value.trim();
   const album = {
     id:          uid(),
