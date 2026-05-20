@@ -239,7 +239,16 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
   }
 
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+      .then(reg => {
+        // When a new SW takes over, reload so the fresh files are used.
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          window.location.reload();
+        });
+        // Kick off an update check immediately on every load.
+        reg.update();
+      })
+      .catch(() => {});
   }
 })();
 
