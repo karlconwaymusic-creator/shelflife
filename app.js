@@ -507,9 +507,10 @@ function openContextMenu(id) {
   $ctxVinyl.classList.toggle('context-btn--active', !!a.vinyl);
   $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
 
-  // Fetch label on-demand if not yet tried (null = untried; '' = no label in Spotify)
-  if (a.label == null && a.spotifyUrl && !a.spotifyUrl.includes('/prerelease/')) {
-    fetchLabelForAlbum(a);
+  // Fetch label on-demand — retry even if previously got '' so diagnostics can fire
+  if (a.spotifyUrl && !a.spotifyUrl.includes('/prerelease/')) {
+    showToast('[diag] stored label: ' + JSON.stringify(a.label));
+    if (a.label == null || a.label === '') fetchLabelForAlbum(a);
   }
 
   $contextMenu.hidden = false;
