@@ -45,6 +45,7 @@ function checkPreReleases() {
 // null label = not yet tried;  '' label = tried, Spotify confirmed no label.
 // Runs with a 300 ms gap between requests to stay well under Spotify's rate limit.
 async function backfillYears() {
+  if (isRateLimited()) return; // respect persisted rate-limit window
   const needsData = albums.filter(a =>
     a.spotifyUrl &&
     !a.spotifyUrl.includes('/prerelease/') &&
@@ -53,6 +54,7 @@ async function backfillYears() {
   if (!needsData.length) return;
   let changed = false;
   for (const a of needsData) {
+    if (isRateLimited()) break; // stop mid-loop if we hit the limit
     await new Promise(r => setTimeout(r, 300)); // pace requests — avoid 429
     try {
       const id = extractAlbumId(a.spotifyUrl);
@@ -61,11 +63,17 @@ async function backfillYears() {
       const res = await fetch(`https://api.spotify.com/v1/albums/${id}`, {
         headers: { 'Authorization': 'Bearer ' + token },
       });
-      if (!res.ok) continue; // skip on any error — will retry next session
+      if (!res.ok) {
+        if (res.status === 429) {
+          const retryAfter = parseInt(res.headers.get('retry-after') || '7200', 10);
+          setRateLimit(Date.now() + retryAfter * 1000);
+        }
+        break; // stop backfill on any error
+      }
       const d = await res.json();
-      if (d.name && !a.year && d.release_date)  { a.year = d.release_date.slice(0, 4); changed = true; }
-      if (d.release_date && !a.releaseDate)      { a.releaseDate = d.release_date;      changed = true; }
-      if (a.label == null)                       { a.label = d.label || '';              changed = true; }
+      if (d.release_date && !a.year)        { a.year = d.release_date.slice(0, 4); changed = true; }
+      if (d.release_date && !a.releaseDate) { a.releaseDate = d.release_date;      changed = true; }
+      if (a.label == null)                  { a.label = d.label || '';              changed = true; }
     } catch (err) {
       console.warn('[LPQ] backfillYears failed for', a.title, err);
     }
@@ -467,14 +475,16 @@ function buildCtxSub(a) {
   return s;
 }
 
-// Rate-limit guard: timestamp until which label fetches should be paused.
-let labelRateLimitUntil = 0;
+// Rate-limit guard — persisted in localStorage so page refreshes respect it too.
+function getRateLimit()       { return parseInt(localStorage.getItem('lpq-rl') || '0', 10); }
+function setRateLimit(until)  { localStorage.setItem('lpq-rl', String(until)); }
+function isRateLimited()      { return Date.now() < getRateLimit(); }
 
 // Fetch and cache the label for an album that's missing it, then update
 // the context menu subtitle live if it's still open for the same album.
 // null  = not yet fetched;  '' = fetched, Spotify confirmed no label.
 async function fetchLabelForAlbum(a) {
-  if (Date.now() < labelRateLimitUntil) return; // still in backoff window
+  if (isRateLimited()) return;
   try {
     const id = extractAlbumId(a.spotifyUrl);
     if (!id) { a.label = ''; save(); return; }
@@ -484,10 +494,11 @@ async function fetchLabelForAlbum(a) {
     });
     if (!res.ok) {
       if (res.status === 429) {
-        // Back off for 60 seconds before retrying any label fetch
-        labelRateLimitUntil = Date.now() + 60_000;
+        // Honour retry-after header; default to 2 hours if missing
+        const retryAfter = parseInt(res.headers.get('retry-after') || '7200', 10);
+        setRateLimit(Date.now() + retryAfter * 1000);
       } else if (res.status === 404) {
-        a.label = ''; save(); // album not in catalog — stop retrying
+        a.label = ''; save();
       }
       return;
     }
