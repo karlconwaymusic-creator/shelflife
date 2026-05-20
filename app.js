@@ -168,7 +168,6 @@ const $ctxArtImg     = document.getElementById('contextArtImg');
 const $ctxNoArt      = document.getElementById('contextNoArt');
 const $ctxTitle      = document.getElementById('contextTitle');
 const $ctxArtist     = document.getElementById('contextArtist');
-const $ctxLabel      = document.getElementById('contextLabel');
 const $ctxVinyl      = document.getElementById('ctxVinyl');
 const $ctxVinylLbl   = document.getElementById('ctxVinylLabel');
 const $ctxArchive    = document.getElementById('ctxArchive');
@@ -432,6 +431,40 @@ function switchView(view) {
 }
 
 // ─── Context menu ─────────────────────────────────────────────────────────────
+
+// Build the artist · year · label subtitle string
+function buildCtxSub(a) {
+  let s = a.artist || '';
+  if (a.preRelease && a.releaseDate) {
+    s += (s ? ' · ' : '') + `Out ${formatReleaseDate(a.releaseDate)}`;
+  } else if (a.year) {
+    s += (s ? ' · ' : '') + a.year;
+  }
+  if (a.label) s += (s ? ' · ' : '') + a.label;
+  return s;
+}
+
+// Fetch and cache the label for an album that's missing it, then update
+// the context menu subtitle live if it's still open for the same album.
+async function fetchLabelForAlbum(a) {
+  try {
+    const id = extractAlbumId(a.spotifyUrl);
+    if (!id) return;
+    const token = await getSpotifyToken();
+    const res = await fetch(`https://api.spotify.com/v1/albums/${id}`, {
+      headers: { 'Authorization': 'Bearer ' + token },
+    });
+    if (!res.ok) return;
+    const d = await res.json();
+    if (!d.label) return;
+    a.label = d.label;
+    save();
+    if (pendingContextId === a.id) {
+      $ctxArtist.textContent = buildCtxSub(a);
+    }
+  } catch {}
+}
+
 function openContextMenu(id) {
   const a = albums.find(a => a.id === id);
   if (!a) return;
@@ -446,18 +479,15 @@ function openContextMenu(id) {
     $ctxNoArt.hidden  = false;
   }
   $ctxTitle.textContent = a.title;
-  let ctxSub = a.artist || '';
-  if (a.preRelease && a.releaseDate) {
-    ctxSub += (ctxSub ? ' · ' : '') + `Out ${formatReleaseDate(a.releaseDate)}`;
-  } else if (a.year) {
-    ctxSub += (ctxSub ? ' · ' : '') + a.year;
-  }
-  $ctxArtist.textContent = ctxSub;
-  $ctxLabel.textContent  = a.label || '';
-  $ctxLabel.hidden       = !a.label;
+  $ctxArtist.textContent = buildCtxSub(a);
   $ctxVinylLbl.textContent = a.vinyl ? 'Remove from Vinyl' : 'Buy on Vinyl';
   $ctxVinyl.classList.toggle('context-btn--active', !!a.vinyl);
   $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
+
+  // Fetch label on-demand if missing (catalog albums only)
+  if (!a.label && a.spotifyUrl && !a.spotifyUrl.includes('/prerelease/')) {
+    fetchLabelForAlbum(a);
+  }
 
   $contextMenu.hidden = false;
   $overlay.classList.add('visible');
