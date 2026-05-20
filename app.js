@@ -199,6 +199,7 @@ const $ctxTitle      = document.getElementById('contextTitle');
 const $ctxArtist     = document.getElementById('contextArtist');
 const $ctxVinyl      = document.getElementById('ctxVinyl');
 const $ctxVinylLbl   = document.getElementById('ctxVinylLabel');
+const $ctxMoveToShelf = document.getElementById('ctxMoveToShelf');
 const $ctxArchive    = document.getElementById('ctxArchive');
 const $ctxRemove     = document.getElementById('ctxRemove');
 const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
@@ -557,6 +558,7 @@ function openContextMenu(id) {
   $ctxArtist.textContent = buildCtxSub(a);
   $ctxVinylLbl.textContent = a.vinyl ? 'Remove from Vinyl' : 'Buy on Vinyl';
   $ctxVinyl.classList.toggle('context-btn--active', !!a.vinyl);
+  $ctxMoveToShelf.hidden = !a.preRelease;
   $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
 
   // Fetch label on-demand if not yet confirmed (null = untried; '' = no label in Spotify)
@@ -663,6 +665,25 @@ function bindEvents() {
   });
 
   // ── Context menu actions ──────────────────────────────────────────────────
+  $ctxMoveToShelf.addEventListener('click', () => {
+    const id = pendingContextId;
+    if (!id) return;
+    const active = albums.filter(a => !a.archived && !a.preRelease);
+    if (active.length >= settings.shelfSize) {
+      showToast(settings.shelfSize < 20
+        ? 'Shelf full — raise the limit in Settings or remove an album'
+        : 'Shelf full — remove an album to make room');
+      return;
+    }
+    const a = albums.find(a => a.id === id);
+    if (!a) return;
+    a.preRelease = false;
+    save();
+    render();
+    showToast('Moved to shelf');
+    closeContextMenu();
+  });
+
   $ctxVinyl.addEventListener('click', () => {
     const id = pendingContextId;
     if (!id) return;
