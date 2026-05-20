@@ -29,12 +29,16 @@ function saveSettings() {
   localStorage.setItem('lpq-settings', JSON.stringify(settings));
 }
 
-// Promote pre-release albums whose release date has now passed
+// Promote pre-release albums whose release date has now passed.
+// Only acts when we have a confirmed release date — albums with no date stay
+// in Pre-Releases until the date is known (backfill) or they're manually moved.
 function checkPreReleases() {
-  const today = new Date().toISOString().slice(0, 10);
   let changed = false;
   for (const a of albums) {
-    if (a.preRelease && !isPreRelease(a.releaseDate, a.spotifyUrl)) {
+    if (!a.preRelease) continue;
+    // Never auto-promote if we don't have a date to check against
+    if (!a.releaseDate && !a.spotifyUrl?.includes('/prerelease/')) continue;
+    if (!isPreRelease(a.releaseDate, a.spotifyUrl)) {
       a.preRelease = false;
       changed = true;
     }
@@ -212,13 +216,18 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
     albums = JSON.parse(localStorage.getItem('lpq') || '[]');
   } catch { albums = []; }
 
-  // One-time migration: reset '' labels (incorrectly set by oEmbed fallback or
-  // rate-limited fetches) so they're re-fetched from the catalog API this session.
-  let labelReset = false;
+  // Migration: reset '' labels (incorrectly set by oEmbed fallback or rate-limited
+  // fetches) so they're re-fetched from the catalog API this session.
+  // Also rescue any album that was wrongly demoted from Pre-Releases to the shelf
+  // (caused by checkPreReleases firing before a release date was known).
+  let migrated = false;
   for (const a of albums) {
-    if (a.label === '') { a.label = null; labelReset = true; }
+    if (a.label === '') { a.label = null; migrated = true; }
+    if (!a.preRelease && !a.archived && isPreRelease(a.releaseDate, a.spotifyUrl)) {
+      a.preRelease = true; migrated = true;
+    }
   }
-  if (labelReset) save();
+  if (migrated) save();
 
   checkPreReleases();
   render();
