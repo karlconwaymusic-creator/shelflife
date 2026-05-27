@@ -784,8 +784,10 @@ function bindEvents() {
         $previewArtist.textContent = (fetchedAlbum.artist || '') +
           (hasMeta ? `${fetchedAlbum.artist ? ' · ' : ''}Out ${formatReleaseDate(fetchedAlbum.releaseDate)}`
                    : (fetchedAlbum.year ? `${fetchedAlbum.artist ? ' · ' : ''}${fetchedAlbum.year}` : ''));
-        // Manual artist field only needed for pre-releases (oEmbed omits artist name)
-        $artistField.hidden  = !(currentView === 'prerelease' && !fetchedAlbum.artist);
+        // Manual artist field only needed for pre-releases (oEmbed omits artist name).
+        // Use style.display so it beats any CSS class rule (e.g. .field-group { display:flex }).
+        const showArtist = currentView === 'prerelease' && !fetchedAlbum.artist;
+        $artistField.style.display = showArtist ? '' : 'none';
         $artistInput.value   = '';
         $fetchLoading.hidden  = true;
         $albumPreview.hidden  = false;
@@ -826,8 +828,8 @@ function resetForm() {
   $albumPreview.hidden = true;
   $fetchError.hidden   = true;
   $fetchLoading.hidden = true;
-  $artistField.hidden    = true;
-  $artistInput.value     = '';
+  $artistField.style.display = 'none';
+  $artistInput.value         = '';
   $submitBtn.disabled    = true;
   $submitBtn.textContent = 'Add to Shelf';
 }
