@@ -807,6 +807,7 @@ function bindEvents() {
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 function openModal() {
+  resetForm();                        // ensure artist field & stale state are cleared before showing
   $modal.hidden = false;
   $overlay.classList.add('visible');
   requestAnimationFrame(() => requestAnimationFrame(() => $modal.classList.add('open')));
