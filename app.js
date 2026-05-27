@@ -277,7 +277,7 @@ function render() {
 }
 
 function renderShelf() {
-  const active = albums.filter(a => !a.archived && !a.preRelease);
+  const active = albums.filter(a => !a.archived && !a.preRelease && !a.detached);
   $shelf.innerHTML = '';
   $empty.style.display = active.length ? 'none' : 'flex';
 
@@ -334,13 +334,9 @@ function renderArchive() {
   for (const a of archived) {
     const row = makeListRow(a, [
       { label: 'Restore', action() { restoreAlbum(a.id); } },
-      { label: 'Delete',  danger: true, action() { deleteAlbum(a.id); } },
+      { label: 'Delete',  danger: true, action() { deleteFromArchive(a.id); } },
     ]);
-    if (a.spotifyUrl) {
-      const thumb = row.querySelector('.list-thumb');
-      thumb.classList.add('list-thumb--link');
-      thumb.addEventListener('click', () => window.location.href = toSpotifyUri(a.spotifyUrl));
-    }
+    // No Spotify tap on archived thumbnails — use the shelf for that
     $archiveList.appendChild(row);
   }
 }
@@ -432,6 +428,8 @@ function toggleVinyl(id) {
   const a = albums.find(a => a.id === id);
   if (!a) return;
   a.vinyl = !a.vinyl;
+  // Detached albums exist only for the vinyl list — clean them up when removed
+  if (!a.vinyl && a.detached) albums = albums.filter(x => x.id !== id);
   save();
 }
 
@@ -444,7 +442,7 @@ function archiveAlbum(id) {
 }
 
 function restoreAlbum(id) {
-  const active = albums.filter(a => !a.archived && !a.preRelease);
+  const active = albums.filter(a => !a.archived && !a.preRelease && !a.detached);
   if (active.length >= settings.shelfSize) {
     showToast('Your shelf is full — remove an album to make room.');
     return;
@@ -458,6 +456,21 @@ function restoreAlbum(id) {
 
 function deleteAlbum(id) {
   albums = albums.filter(a => a.id !== id);
+  save();
+  render();
+}
+
+// Delete from archive — if the album is in the vinyl wishlist, keep it there
+// as a detached entry rather than removing it entirely.
+function deleteFromArchive(id) {
+  const a = albums.find(a => a.id === id);
+  if (!a) return;
+  if (a.vinyl) {
+    a.archived = false;
+    a.detached = true; // vinyl-only: hidden from shelf/archive, visible in vinyl
+  } else {
+    albums = albums.filter(x => x.id !== id);
+  }
   save();
   render();
 }
@@ -707,7 +720,7 @@ function bindEvents() {
     // On the pre-releases tab the shelf limit doesn't apply — pre-releases
     // don't occupy a shelf slot, so always allow the modal to open.
     if (currentView !== 'prerelease') {
-      if (albums.filter(a => !a.archived && !a.preRelease).length >= settings.shelfSize) {
+      if (albums.filter(a => !a.archived && !a.preRelease && !a.detached).length >= settings.shelfSize) {
         showToast(settings.shelfSize < 20
           ? 'Shelf full — raise the limit in Settings or remove an album'
           : 'Shelf full — remove an album to make room');
@@ -838,7 +851,7 @@ function onSubmit(e) {
   const isPre = isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl) || currentView === 'prerelease';
 
   // Shelf-full guard only applies to albums actually going onto the shelf.
-  if (!isPre && albums.filter(a => !a.archived && !a.preRelease).length >= settings.shelfSize) {
+  if (!isPre && albums.filter(a => !a.archived && !a.preRelease && !a.detached).length >= settings.shelfSize) {
     showToast(settings.shelfSize < 20
       ? 'Shelf full — raise the limit in Settings or remove an album'
       : 'Shelf full — remove an album to make room');
