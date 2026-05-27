@@ -786,7 +786,7 @@ function bindEvents() {
                    : (fetchedAlbum.year ? `${fetchedAlbum.artist ? ' · ' : ''}${fetchedAlbum.year}` : ''));
         // Manual artist field only needed for pre-releases (oEmbed omits artist name).
         // Use style.display so it beats any CSS class rule (e.g. .field-group { display:flex }).
-        const showArtist = currentView === 'prerelease' && !fetchedAlbum.artist;
+        const showArtist = currentView === 'prerelease';
         $artistField.classList.toggle('visible', showArtist);
         $artistInput.value   = '';
         $fetchLoading.hidden  = true;
