@@ -485,7 +485,7 @@ function switchView(view) {
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.classList.toggle('tab-btn--active', btn.dataset.view === view);
   });
-  $addBtn.style.display = (view === 'shelf' || view === 'prerelease') ? '' : 'none';
+  $addBtn.style.display = (view === 'shelf' || view === 'prerelease' || view === 'vinyl') ? '' : 'none';
 }
 
 // ─── Context menu ─────────────────────────────────────────────────────────────
@@ -717,9 +717,8 @@ function bindEvents() {
 
   // ── Modal open / close ────────────────────────────────────────────────────
   $addBtn.addEventListener('click', () => {
-    // On the pre-releases tab the shelf limit doesn't apply — pre-releases
-    // don't occupy a shelf slot, so always allow the modal to open.
-    if (currentView !== 'prerelease') {
+    // Vinyl and pre-release tabs don't occupy shelf slots — always allow.
+    if (currentView === 'shelf') {
       if (albums.filter(a => !a.archived && !a.preRelease && !a.detached).length >= settings.shelfSize) {
         showToast(settings.shelfSize < 20
           ? 'Shelf full — raise the limit in Settings or remove an album'
@@ -787,20 +786,21 @@ function bindEvents() {
         $previewArt.src            = fetchedAlbum.art || '';
         $previewArt.hidden         = !fetchedAlbum.art;
         $previewTitle.textContent  = fetchedAlbum.title;
+        const isVinyl = currentView === 'vinyl';
         // If opened from the Pre-Releases tab, always treat as pre-release —
         // oEmbed albums without a /prerelease/ URL or release date won't auto-detect.
-        const isPre = isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl) || currentView === 'prerelease';
+        const isPre = !isVinyl && (isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl) || currentView === 'prerelease');
         const hasMeta = isPre && fetchedAlbum.releaseDate;
         $previewArtist.textContent = (fetchedAlbum.artist || '') +
           (hasMeta ? `${fetchedAlbum.artist ? ' · ' : ''}Out ${formatReleaseDate(fetchedAlbum.releaseDate)}`
                    : (fetchedAlbum.year ? `${fetchedAlbum.artist ? ' · ' : ''}${fetchedAlbum.year}` : ''));
-        // Show manual artist field when the API couldn't provide one
-        $artistField.hidden  = !!fetchedAlbum.artist;
+        // Manual artist field only needed for pre-releases (oEmbed omits artist name)
+        $artistField.hidden  = !(currentView === 'prerelease' && !fetchedAlbum.artist);
         $artistInput.value   = '';
         $fetchLoading.hidden  = true;
         $albumPreview.hidden  = false;
         $submitBtn.disabled   = false;
-        $submitBtn.textContent = isPre ? 'Add to Pre-Releases' : 'Add to Shelf';
+        $submitBtn.textContent = isVinyl ? 'Add to Vinyl' : isPre ? 'Add to Pre-Releases' : 'Add to Shelf';
       } catch {
         $fetchLoading.hidden  = true;
         $fetchError.textContent = 'Couldn\'t find that album — check the URL and try again.';
@@ -847,17 +847,19 @@ function onSubmit(e) {
   e.preventDefault();
   if (!fetchedAlbum) return;
 
+  const isVinyl = currentView === 'vinyl';
   // Mirror the same logic as the URL lookup — opening from Pre-Releases tab forces pre-release.
-  const isPre = isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl) || currentView === 'prerelease';
+  const isPre = !isVinyl && (isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl) || currentView === 'prerelease');
 
-  // Shelf-full guard only applies to albums actually going onto the shelf.
-  if (!isPre && albums.filter(a => !a.archived && !a.preRelease && !a.detached).length >= settings.shelfSize) {
+  // Shelf-full guard only applies to albums going onto the shelf.
+  if (!isPre && !isVinyl && albums.filter(a => !a.archived && !a.preRelease && !a.detached).length >= settings.shelfSize) {
     showToast(settings.shelfSize < 20
       ? 'Shelf full — raise the limit in Settings or remove an album'
       : 'Shelf full — remove an album to make room');
     return;
   }
-  const artist = fetchedAlbum.artist || $artistInput.value.trim();
+  // Artist field is only shown for pre-releases; for shelf/vinyl use whatever the API returned.
+  const artist = fetchedAlbum.artist || (currentView === 'prerelease' ? $artistInput.value.trim() : '');
   const album = {
     id:          uid(),
     title:       fetchedAlbum.title,
@@ -868,7 +870,8 @@ function onSubmit(e) {
     releaseDate: fetchedAlbum.releaseDate ?? null,
     label:       fetchedAlbum.label ?? null,
     addedAt:     Date.now(),
-    vinyl:       false,
+    vinyl:       isVinyl,
+    detached:    isVinyl,
     archived:    false,
     preRelease:  isPre,
   };
