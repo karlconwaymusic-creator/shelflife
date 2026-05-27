@@ -625,6 +625,11 @@ main { padding: 0; }
 }
 .field-group[hidden] { display: none !important; }
 
+/* Artist field hidden by default at ID level (beats .field-group class rule);
+   shown only when .visible class is added by JS */
+#artistField          { display: none !important; }
+#artistField.visible  { display: flex !important; }
+
 .label {
   font-size: 0.7rem;
   font-weight: 600;

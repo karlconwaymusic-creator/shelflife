@@ -787,7 +787,7 @@ function bindEvents() {
         // Manual artist field only needed for pre-releases (oEmbed omits artist name).
         // Use style.display so it beats any CSS class rule (e.g. .field-group { display:flex }).
         const showArtist = currentView === 'prerelease' && !fetchedAlbum.artist;
-        $artistField.style.display = showArtist ? '' : 'none';
+        $artistField.classList.toggle('visible', showArtist);
         $artistInput.value   = '';
         $fetchLoading.hidden  = true;
         $albumPreview.hidden  = false;
@@ -829,8 +829,8 @@ function resetForm() {
   $albumPreview.hidden = true;
   $fetchError.hidden   = true;
   $fetchLoading.hidden = true;
-  $artistField.style.display = 'none';
-  $artistInput.value         = '';
+  $artistField.classList.remove('visible');
+  $artistInput.value = '';
   $submitBtn.disabled    = true;
   $submitBtn.textContent = 'Add to Shelf';
 }
