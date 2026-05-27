@@ -623,6 +623,7 @@ main { padding: 0; }
   flex-direction: column;
   gap: 6px;
 }
+.field-group[hidden] { display: none !important; }
 
 .label {
   font-size: 0.7rem;
