@@ -478,6 +478,10 @@ main { padding: 0; }
 .context-btn--danger    { color: rgb(255,69,58); }
 .context-btn--active    { color: var(--accent); }
 
+/* Move to Shelf hidden by default at ID level (beats .context-btn class rule) */
+#ctxMoveToShelf         { display: none !important; }
+#ctxMoveToShelf.visible { display: flex !important; }
+
 @media (min-width: 600px) {
   .context-menu { align-items: center; justify-content: center; }
   .context-sheet {
