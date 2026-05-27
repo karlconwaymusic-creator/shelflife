@@ -547,7 +547,7 @@ function openContextMenu(id) {
   $ctxArtist.textContent = buildCtxSub(a);
   $ctxVinylLbl.textContent = a.vinyl ? 'Remove from Vinyl' : 'Buy on Vinyl';
   $ctxVinyl.classList.toggle('context-btn--active', !!a.vinyl);
-  $ctxMoveToShelf.hidden = !a.preRelease;
+  $ctxMoveToShelf.hidden = currentView !== 'prerelease';
   $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
 
   // Fetch label on-demand if not yet confirmed (null = untried; '' = no label in Spotify)
