@@ -807,7 +807,9 @@ function bindEvents() {
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
 function openModal() {
-  resetForm();                        // ensure artist field & stale state are cleared before showing
+  resetForm();                        // clear stale state; hides artist field
+  // On pre-releases tab the artist field is always shown (Spotify may omit it for unreleased albums)
+  if (currentView === 'prerelease') $artistField.classList.add('visible');
   $modal.hidden = false;
   $overlay.classList.add('visible');
   requestAnimationFrame(() => requestAnimationFrame(() => $modal.classList.add('open')));
