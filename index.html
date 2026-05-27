@@ -13,12 +13,30 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
   <link rel="stylesheet" href="styles.css">
-  <!-- Inline SW update listener — runs before app.js so it works on any cached version -->
+  <!-- SW bootstrap — inline so it runs from the always-fresh index.html,
+       not from potentially-stale cached app.js -->
   <script>
     if ('serviceWorker' in navigator) {
+      // Reload when SW sends an explicit reload message
       navigator.serviceWorker.addEventListener('message', function(e) {
         if (e.data && e.data.type === 'SW_RELOAD') window.location.reload();
       });
+      // Reload when a new SW takes control (covers skipWaiting path)
+      navigator.serviceWorker.addEventListener('controllerchange', function() {
+        window.location.reload();
+      });
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+        .then(function(reg) {
+          // Detect a new SW installing and reload once it activates
+          reg.addEventListener('updatefound', function() {
+            var w = reg.installing;
+            w.addEventListener('statechange', function() {
+              if (w.state === 'activated') window.location.reload();
+            });
+          });
+          // Kick off an update check on every page load
+          reg.update();
+        });
     }
   </script>
 </head>
