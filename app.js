@@ -153,14 +153,14 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
   if (!oe.ok) throw new Error('Album not found');
   const d = await oe.json();
 
-  // oEmbed html contains an embed iframe whose src uses the canonical /album/ ID.
-  // Extract it and retry the catalog API — this makes /prerelease/ URLs behave
-  // identically to /album/ URLs when the catalog entry already exists.
-  const embedMatch = (d.html || '').match(/open\.spotify\.com\/embed\/album\/([A-Za-z0-9]+)/);
-  if (embedMatch) {
+  // oEmbed html contains an embed iframe — try to extract a catalog-resolvable ID.
+  // Spotify may use /embed/album/ or /embed/prerelease/ in the src.
+  console.log('[LPQ] oEmbed html:', d.html);
+  const embedId = ((d.html || '').match(/open\.spotify\.com\/embed\/(?:album|prerelease)\/([A-Za-z0-9]+)/) || [])[1];
+  if (embedId) {
     try {
       const token = await getSpotifyToken();
-      const res2 = await fetch(`https://api.spotify.com/v1/albums/${embedMatch[1]}`, {
+      const res2 = await fetch(`https://api.spotify.com/v1/albums/${embedId}`, {
         headers: { 'Authorization': 'Bearer ' + token },
       });
       if (res2.ok) {
@@ -174,8 +174,14 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
           releaseDate: cd.release_date ?? null,
           label:       cd.label ?? null,
         };
+      } else {
+        console.log('[LPQ] catalog retry failed:', res2.status, 'embedId:', embedId);
       }
-    } catch {}
+    } catch (err) {
+      console.log('[LPQ] catalog retry error:', err);
+    }
+  } else {
+    console.log('[LPQ] no embed ID found in oEmbed html');
   }
 
   // Genuine fallback — album truly not in catalog yet
