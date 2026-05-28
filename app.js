@@ -358,12 +358,10 @@ function renderPreRelease() {
       card.appendChild(noArt);
     }
 
-    if (a.releaseDate) {
-      const badge = document.createElement('div');
-      badge.className = 'album-card__date';
-      badge.textContent = formatReleaseDate(a.releaseDate);
-      card.appendChild(badge);
-    }
+    const badge = document.createElement('div');
+    badge.className = 'album-card__date';
+    badge.textContent = a.releaseDate ? formatReleaseDate(a.releaseDate) : 'Coming soon';
+    card.appendChild(badge);
 
     $preReleaseGrid.appendChild(card);
   }
