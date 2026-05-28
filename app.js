@@ -71,8 +71,9 @@ async function backfillYears() {
         if (res.status === 429) {
           const retryAfter = parseInt(res.headers.get('retry-after') || '7200', 10);
           setRateLimit(Date.now() + retryAfter * 1000);
+          break; // must stop on rate limit
         }
-        break; // stop backfill on any error
+        continue; // 404 / other error — skip this album, keep going
       }
       const d = await res.json();
       if (d.release_date && !a.year)        { a.year = d.release_date.slice(0, 4); changed = true; }
@@ -181,8 +182,10 @@ const $albumPreview  = document.getElementById('albumPreview');
 const $previewArt    = document.getElementById('previewArt');
 const $previewTitle  = document.getElementById('previewTitle');
 const $previewArtist = document.getElementById('previewArtist');
-const $artistField   = document.getElementById('artistField');
-const $artistInput   = document.getElementById('artistInput');
+const $artistField        = document.getElementById('artistField');
+const $artistInput        = document.getElementById('artistInput');
+const $releaseDateField   = document.getElementById('releaseDateField');
+const $releaseDateInput   = document.getElementById('releaseDateInput');
 const $submitBtn     = document.getElementById('submitBtn');
 const $settingArchive   = document.getElementById('settingArchive');
 const $settingShelfSize = document.getElementById('settingShelfSize');
@@ -786,6 +789,9 @@ function bindEvents() {
         // Use style.display so it beats any CSS class rule (e.g. .field-group { display:flex }).
         const showArtist = currentView === 'prerelease';
         $artistField.classList.toggle('visible', showArtist);
+        $releaseDateField.classList.toggle('visible', showArtist);
+        // Pre-fill date picker if Spotify returned one, otherwise leave blank
+        if (showArtist) $releaseDateInput.value = fetchedAlbum.releaseDate || '';
         $artistInput.value   = '';
         $fetchLoading.hidden  = true;
         $albumPreview.hidden  = false;
@@ -807,7 +813,10 @@ function bindEvents() {
 function openModal() {
   resetForm();                        // clear stale state; hides artist field
   // On pre-releases tab the artist field is always shown (Spotify may omit it for unreleased albums)
-  if (currentView === 'prerelease') $artistField.classList.add('visible');
+  if (currentView === 'prerelease') {
+    $artistField.classList.add('visible');
+    $releaseDateField.classList.add('visible');
+  }
   $modal.hidden = false;
   $overlay.classList.add('visible');
   requestAnimationFrame(() => requestAnimationFrame(() => $modal.classList.add('open')));
@@ -831,6 +840,8 @@ function resetForm() {
   $fetchLoading.hidden = true;
   $artistField.classList.remove('visible');
   $artistInput.value = '';
+  $releaseDateField.classList.remove('visible');
+  $releaseDateInput.value = '';
   $submitBtn.disabled    = true;
   $submitBtn.textContent = 'Add to Shelf';
 }
@@ -851,16 +862,18 @@ function onSubmit(e) {
       : 'Shelf full — remove an album to make room');
     return;
   }
-  // Artist field is only shown for pre-releases; for shelf/vinyl use whatever the API returned.
+  // Artist / date fields are only shown for pre-releases; shelf/vinyl use whatever the API returned.
   const artist = fetchedAlbum.artist || (currentView === 'prerelease' ? $artistInput.value.trim() : '');
+  const manualDate = currentView === 'prerelease' ? $releaseDateInput.value || null : null;
+  const releaseDate = fetchedAlbum.releaseDate ?? manualDate;
   const album = {
     id:          uid(),
     title:       fetchedAlbum.title,
     artist:      artist,
     art:         fetchedAlbum.art,
     spotifyUrl:  fetchedAlbum.spotifyUrl,
-    year:        fetchedAlbum.year ?? null,
-    releaseDate: fetchedAlbum.releaseDate ?? null,
+    year:        fetchedAlbum.year ?? (releaseDate ? releaseDate.slice(0, 4) : null),
+    releaseDate: releaseDate,
     label:       fetchedAlbum.label ?? null,
     addedAt:     Date.now(),
     vinyl:       isVinyl,
