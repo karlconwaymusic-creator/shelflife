@@ -152,9 +152,36 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
   );
   if (!oe.ok) throw new Error('Album not found');
   const d = await oe.json();
+
+  // oEmbed html contains an embed iframe whose src uses the canonical /album/ ID.
+  // Extract it and retry the catalog API — this makes /prerelease/ URLs behave
+  // identically to /album/ URLs when the catalog entry already exists.
+  const embedMatch = (d.html || '').match(/open\.spotify\.com\/embed\/album\/([A-Za-z0-9]+)/);
+  if (embedMatch) {
+    try {
+      const token = await getSpotifyToken();
+      const res2 = await fetch(`https://api.spotify.com/v1/albums/${embedMatch[1]}`, {
+        headers: { 'Authorization': 'Bearer ' + token },
+      });
+      if (res2.ok) {
+        const cd = await res2.json();
+        return {
+          title:       cd.name,
+          artist:      cd.artists.map(a => a.name).join(', '),
+          art:         cd.images[0]?.url ?? null,
+          spotifyUrl:  cd.external_urls.spotify,
+          year:        cd.release_date ? cd.release_date.slice(0, 4) : null,
+          releaseDate: cd.release_date ?? null,
+          label:       cd.label ?? null,
+        };
+      }
+    } catch {}
+  }
+
+  // Genuine fallback — album truly not in catalog yet
   return {
     title:       d.title,
-    artist:      d.author_name || '',   // oEmbed omits author_name for prereleases
+    artist:      d.author_name || '',
     art:         d.thumbnail_url ?? null,
     spotifyUrl:  rawUrl.split('?')[0],
     year:        null,
