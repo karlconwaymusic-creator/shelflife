@@ -271,7 +271,7 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
   backfillYears();
 
   // Restore the last active tab so a refresh doesn't bounce the user to shelf
-  const savedView = localStorage.getItem('lpq-view');
+  const savedView = sessionStorage.getItem('lpq-view');
   const validViews = ['shelf', 'prerelease', 'vinyl', 'archive', 'settings'];
   if (savedView && validViews.includes(savedView)) switchView(savedView);
 
@@ -512,7 +512,7 @@ function deleteFromArchive(id) {
 // ─── View switching ───────────────────────────────────────────────────────────
 function switchView(view) {
   currentView = view;
-  localStorage.setItem('lpq-view', view);
+  sessionStorage.setItem('lpq-view', view);
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
   document.querySelectorAll('.view').forEach(el => {
     el.classList.toggle('view--hidden', el.id !== `view${cap(view)}`);
