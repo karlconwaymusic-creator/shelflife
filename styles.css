@@ -575,6 +575,9 @@ main { padding: 0; }
   font-size: 0.85rem;
   padding: 12px 0 4px;
 }
+.fetch-error.fetch-error--info {
+  color: var(--text2);
+}
 
 .album-preview {
   display: flex;

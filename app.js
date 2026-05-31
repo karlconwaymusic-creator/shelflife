@@ -191,13 +191,14 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
 
   // Genuine fallback — album truly not in catalog yet
   return {
-    title:       d.title,
-    artist:      d.author_name || '',
-    art:         d.thumbnail_url ?? null,
-    spotifyUrl:  rawUrl.split('?')[0],
-    year:        null,
-    releaseDate: null,
-    label:       null,
+    title:         d.title,
+    artist:        d.author_name || '',
+    art:           d.thumbnail_url ?? null,
+    spotifyUrl:    rawUrl.split('?')[0],
+    year:          null,
+    releaseDate:   null,
+    label:         null,
+    partialLookup: true, // flag: only title+art retrieved; artist/date need manual entry
   };
 }
 
@@ -834,9 +835,21 @@ function bindEvents() {
         const showArtist = currentView === 'prerelease';
         $artistField.classList.toggle('visible', showArtist);
         $releaseDateField.classList.toggle('visible', showArtist);
-        // Pre-fill date picker if Spotify returned one, otherwise leave blank
-        if (showArtist) $releaseDateInput.value = fetchedAlbum.releaseDate || '';
-        $artistInput.value   = '';
+        if (showArtist) {
+          // Pre-fill whatever we got from oEmbed; blank if nothing
+          $artistInput.value      = fetchedAlbum.artist || '';
+          $releaseDateInput.value = fetchedAlbum.releaseDate || '';
+        }
+        // If this was a /prerelease/ URL that couldn't be resolved to catalog data,
+        // show a clear notice so the user knows to fill in the missing fields
+        if (data.partialLookup && rawUrl.includes('/prerelease/')) {
+          $fetchError.textContent = 'Pre-release link — title and artwork fetched. Please fill in the artist and release date below.';
+          $fetchError.classList.add('fetch-error--info');
+          $fetchError.hidden = false;
+        } else {
+          $fetchError.classList.remove('fetch-error--info');
+          $fetchError.hidden = true;
+        }
         $fetchLoading.hidden  = true;
         $albumPreview.hidden  = false;
         $submitBtn.disabled   = false;
@@ -881,6 +894,7 @@ function resetForm() {
   fetchedAlbum         = null;
   $albumPreview.hidden = true;
   $fetchError.hidden   = true;
+  $fetchError.classList.remove('fetch-error--info');
   $fetchLoading.hidden = true;
   $artistField.classList.remove('visible');
   $artistInput.value = '';
