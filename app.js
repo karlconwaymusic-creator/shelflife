@@ -37,7 +37,12 @@ function checkPreReleases() {
     // Never auto-promote if we don't have a date to check against
     if (!a.releaseDate && !a.spotifyUrl?.includes('/prerelease/')) continue;
     if (!isPreRelease(a.releaseDate, a.spotifyUrl)) {
+      // Check shelf capacity before marking as released (before it counts toward the shelf)
+      const shelfFull = albums.filter(
+        x => !x.archived && !x.preRelease && !x.detached
+      ).length >= settings.shelfSize;
       a.preRelease = false;
+      if (shelfFull) a.archived = true; // no room — go straight to archive
       changed = true;
     }
   }
@@ -941,14 +946,17 @@ function toSpotifyUri(url) {
 // Returns true if the album should live in the Pre-Releases section.
 // Checks release date (if known) OR the Spotify URL path (/prerelease/).
 function isPreRelease(releaseDate, spotifyUrl) {
-  // URL path is the most reliable signal for Spotify prerelease content
+  // A confirmed past/present date means it's been released — beats URL pattern
+  if (releaseDate) {
+    const parts = releaseDate.split('-');
+    const pastYear = parts.length === 1 && parseInt(parts[0]) <= new Date().getFullYear();
+    const pastDate = parts.length > 1 && releaseDate <= new Date().toISOString().slice(0, 10);
+    if (pastYear || pastDate) return false;
+  }
+  // No confirmed past date — URL pattern is the next best signal
   if (spotifyUrl && spotifyUrl.includes('/prerelease/')) return true;
   if (!releaseDate) return false;
-  const parts = releaseDate.split('-');
-  // Year-only: pre-release only if it's a future year
-  if (parts.length === 1) return parseInt(parts[0]) > new Date().getFullYear();
-  // Full date or year-month: lexicographic compare works fine
-  return releaseDate > new Date().toISOString().slice(0, 10);
+  return true; // has a date and it's confirmed future (checked above)
 }
 
 // Format a Spotify release_date for display (e.g. "15 Jun 2025")
