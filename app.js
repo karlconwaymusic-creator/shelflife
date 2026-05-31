@@ -270,6 +270,11 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
   applySettingsUI();
   backfillYears();
 
+  // Restore the last active tab so a refresh doesn't bounce the user to shelf
+  const savedView = localStorage.getItem('lpq-view');
+  const validViews = ['shelf', 'prerelease', 'vinyl', 'archive', 'settings'];
+  if (savedView && validViews.includes(savedView)) switchView(savedView);
+
   // SW registration and update logic lives in the inline script in index.html
   // so it always runs from the network-fresh HTML regardless of cached app.js.
 })();
@@ -507,6 +512,7 @@ function deleteFromArchive(id) {
 // ─── View switching ───────────────────────────────────────────────────────────
 function switchView(view) {
   currentView = view;
+  localStorage.setItem('lpq-view', view);
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
   document.querySelectorAll('.view').forEach(el => {
     el.classList.toggle('view--hidden', el.id !== `view${cap(view)}`);
