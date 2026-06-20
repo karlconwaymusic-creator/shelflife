@@ -561,21 +561,35 @@ function isRateLimited() {
 // the context menu subtitle live if it's still open for the same album.
 // null  = not yet fetched;  '' = fetched, Spotify confirmed no label.
 async function fetchLabelForAlbum(a) {
-  if (isRateLimited()) return;
+  const showStatus = (msg) => {
+    if (pendingContextId === a.id) $ctxArtist.textContent = buildCtxSub(a) + (buildCtxSub(a) ? ' · ' : '') + msg;
+  };
+  if (isRateLimited()) { showStatus('rate-limited'); return; }
+  showStatus('fetching label…');
   try {
     const id = extractAlbumId(a.spotifyUrl);
-    if (!id) { a.label = ''; save(); return; }
+    if (!id) {
+      console.warn('[LPQ] fetchLabelForAlbum: could not extract album ID from', a.spotifyUrl);
+      a.label = ''; save();
+      if (pendingContextId === a.id) $ctxArtist.textContent = buildCtxSub(a);
+      return;
+    }
     const token = await getSpotifyToken();
     const res = await fetch(`https://api.spotify.com/v1/albums/${id}`, {
       headers: { 'Authorization': 'Bearer ' + token },
     });
     if (!res.ok) {
+      console.warn('[LPQ] fetchLabelForAlbum: API returned', res.status, 'for', a.title, '(id:', id, ')');
       if (res.status === 429) {
         // Honour retry-after header; default to 2 hours if missing
         const retryAfter = parseInt(res.headers.get('retry-after') || '7200', 10);
         setRateLimit(Date.now() + retryAfter * 1000);
+        showStatus('rate-limited');
       } else if (res.status === 404) {
         a.label = ''; save();
+        if (pendingContextId === a.id) $ctxArtist.textContent = buildCtxSub(a);
+      } else {
+        showStatus(`fetch failed (${res.status})`);
       }
       return;
     }
@@ -587,6 +601,7 @@ async function fetchLabelForAlbum(a) {
     }
   } catch (err) {
     console.warn('[LPQ] fetchLabelForAlbum error:', err);
+    showStatus('fetch error — see console');
   }
 }
 
