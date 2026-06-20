@@ -265,6 +265,15 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
   }
   if (migrated) save();
 
+  // Auto-heal a stale rate-limit window left over from earlier testing/usage —
+  // real Spotify 429s are short-lived; anything still blocking >30 min later
+  // is almost certainly stuck state, so clear it rather than silently stalling.
+  const rl = getRateLimit();
+  if (rl && rl - Date.now() > 30 * 60 * 1000) {
+    console.warn('[LPQ] Clearing stale rate-limit window (was blocking for', Math.ceil((rl - Date.now()) / 60000), 'more minutes)');
+    localStorage.removeItem('lpq-rl');
+  }
+
   checkPreReleases();
   render();
   bindEvents();
@@ -541,7 +550,12 @@ function buildCtxSub(a) {
 // Rate-limit guard — persisted in localStorage so page refreshes respect it too.
 function getRateLimit()       { return parseInt(localStorage.getItem('lpq-rl') || '0', 10); }
 function setRateLimit(until)  { localStorage.setItem('lpq-rl', String(until)); }
-function isRateLimited()      { return Date.now() < getRateLimit(); }
+function isRateLimited() {
+  const until = getRateLimit();
+  const limited = Date.now() < until;
+  if (limited) console.warn('[LPQ] Spotify rate-limited for another', Math.ceil((until - Date.now()) / 1000), 'seconds — label/year fetches are paused.');
+  return limited;
+}
 
 // Fetch and cache the label for an album that's missing it, then update
 // the context menu subtitle live if it's still open for the same album.
