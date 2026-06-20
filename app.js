@@ -1,5 +1,7 @@
 'use strict';
 
+const APP_VERSION = 'v39'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
 let pendingContextId = null;
@@ -96,6 +98,8 @@ function applySettingsUI() {
   $settingShelfSize.value    = settings.shelfSize;
   $shelfSizeVal.textContent  = settings.shelfSize;
   $settingShopUrl.value      = settings.shopUrl;
+  const $version = document.getElementById('appVersion');
+  if ($version) $version.textContent = 'LPQ ' + APP_VERSION;
 }
 
 // ─── Spotify ──────────────────────────────────────────────────────────────────

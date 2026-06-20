@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="styles.css?v=38">
+  <link rel="stylesheet" href="styles.css?v=39">
   <!-- SW bootstrap — inline so it runs from the always-fresh index.html,
        not from potentially-stale cached app.js -->
   <script>
@@ -142,6 +142,10 @@
           <div class="settings-title">Record Shop URL</div>
           <input type="url" id="settingShopUrl" class="input settings-input" placeholder="https://towerrecords.ie/search?q=" autocomplete="off" inputmode="url" spellcheck="false">
           <div class="settings-desc">Enter your shop's search URL, e.g. https://towerrecords.ie/search?q= — LPQ will append the artist and album name automatically.</div>
+        </div>
+
+        <div class="settings-row settings-row--col">
+          <div class="settings-desc" id="appVersion" style="text-align:center; padding-top:8px;"></div>
         </div>
 
       </div>
@@ -327,6 +331,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=38"></script>
+  <script src="app.js?v=39"></script>
 </body>
 </html>
