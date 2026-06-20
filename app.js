@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v39'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v40'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -51,16 +51,18 @@ function checkPreReleases() {
   if (changed) save();
 }
 
-// Silently fetch release years / dates / labels for albums that pre-date those features.
-// Pre-release albums are skipped — oEmbed never returns label/year for unreleased content.
-// null label = not yet tried;  '' label = tried, Spotify confirmed no label.
+// Silently fetch release years / dates for albums that pre-date those features.
+// Pre-release albums are skipped — oEmbed never returns year for unreleased content.
 // Runs with a 300 ms gap between requests to stay well under Spotify's rate limit.
+// Record labels are NOT fetched here — Spotify's catalog API returns label:null
+// for every album regardless of how well-documented it is (confirmed by direct
+// testing), so label lookups go through MusicBrainz instead — see backfillLabels().
 async function backfillYears() {
   if (isRateLimited()) return; // respect persisted rate-limit window
   const needsData = albums.filter(a =>
     a.spotifyUrl &&
     !a.spotifyUrl.includes('/prerelease/') &&
-    (!a.year || !a.releaseDate || a.label == null)
+    (!a.year || !a.releaseDate)
   );
   if (!needsData.length) return;
   let changed = false;
@@ -85,12 +87,54 @@ async function backfillYears() {
       const d = await res.json();
       if (d.release_date && !a.year)        { a.year = d.release_date.slice(0, 4); changed = true; }
       if (d.release_date && !a.releaseDate) { a.releaseDate = d.release_date;      changed = true; }
-      if (a.label == null)                  { a.label = d.label || '';              changed = true; }
     } catch (err) {
       console.warn('[LPQ] backfillYears failed for', a.title, err);
     }
   }
   if (changed) { save(); render(); }
+}
+
+// ─── MusicBrainz (record label lookup) ─────────────────────────────────────────
+// Public API, no key required, but rate-limited to ~1 request/second.
+// mbThrottle() enforces a minimum gap between calls across the whole app.
+let mbLastCall = 0;
+async function mbThrottle() {
+  const wait = Math.max(0, 1100 - (Date.now() - mbLastCall));
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  mbLastCall = Date.now();
+}
+
+async function fetchLabelFromMusicBrainz(artist, title) {
+  if (!artist || !title) return '';
+  await mbThrottle();
+  try {
+    const query = `artist:"${artist.replace(/"/g, '')}" AND release:"${title.replace(/"/g, '')}"`;
+    const url = `https://musicbrainz.org/ws/2/release/?query=${encodeURIComponent(query)}&fmt=json&limit=5`;
+    const res = await fetch(url);
+    if (!res.ok) return '';
+    const d = await res.json();
+    const withLabel = (d.releases || []).find(r => r['label-info']?.[0]?.label?.name);
+    return withLabel?.['label-info'][0].label.name || '';
+  } catch (err) {
+    console.warn('[LPQ] MusicBrainz label lookup failed for', title, err);
+    return '';
+  }
+}
+
+// Background pass to backfill labels for albums missing one. Runs after
+// backfillYears so artist/title are already populated. One request per
+// second via mbThrottle — slow on purpose to respect MusicBrainz's public API.
+async function backfillLabels() {
+  const needsLabel = albums.filter(a => a.label == null && a.artist && a.title);
+  if (!needsLabel.length) return;
+  let changed = false;
+  for (const a of needsLabel) {
+    a.label = await fetchLabelFromMusicBrainz(a.artist, a.title); // '' if no match
+    changed = true;
+    save(); // save incrementally so progress isn't lost if interrupted
+    if (pendingContextId === a.id) $ctxArtist.textContent = buildCtxSub(a);
+  }
+  if (changed) render();
 }
 
 function applySettingsUI() {
@@ -261,13 +305,15 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
     albums = JSON.parse(localStorage.getItem('lpq') || '[]');
   } catch { albums = []; }
 
-  // Migration: reset '' labels (incorrectly set by oEmbed fallback or rate-limited
-  // fetches) so they're re-fetched from the catalog API this session.
-  let migrated = false;
-  for (const a of albums) {
-    if (a.label === '') { a.label = null; migrated = true; }
+  // One-time migration: every existing label was sourced from Spotify, which
+  // always returns null — reset to null so MusicBrainz gets a first real attempt.
+  // Guarded so it only runs once; otherwise it would wipe freshly-fetched
+  // MusicBrainz labels on every subsequent app load.
+  if (!localStorage.getItem('lpq-mb-migrated')) {
+    for (const a of albums) a.label = null;
+    save();
+    localStorage.setItem('lpq-mb-migrated', '1');
   }
-  if (migrated) save();
 
   // Auto-heal a stale rate-limit window left over from earlier testing/usage —
   // real Spotify 429s are short-lived; anything still blocking >30 min later
@@ -283,6 +329,7 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
   bindEvents();
   applySettingsUI();
   backfillYears();
+  backfillLabels();
 
   // Restore the last active tab so a refresh doesn't bounce the user to shelf
   const savedView = sessionStorage.getItem('lpq-view');
@@ -557,56 +604,23 @@ function setRateLimit(until)  { localStorage.setItem('lpq-rl', String(until)); }
 function isRateLimited() {
   const until = getRateLimit();
   const limited = Date.now() < until;
-  if (limited) console.warn('[LPQ] Spotify rate-limited for another', Math.ceil((until - Date.now()) / 1000), 'seconds — label/year fetches are paused.');
+  if (limited) console.warn('[LPQ] Spotify rate-limited for another', Math.ceil((until - Date.now()) / 1000), 'seconds — year/date fetches are paused.');
   return limited;
 }
 
 // Fetch and cache the label for an album that's missing it, then update
 // the context menu subtitle live if it's still open for the same album.
-// null  = not yet fetched;  '' = fetched, Spotify confirmed no label.
+// Source: MusicBrainz, not Spotify — Spotify's catalog API returns label:null
+// for every album regardless of how well-documented it is.
+// null = not yet fetched;  '' = fetched, no MusicBrainz match found.
 async function fetchLabelForAlbum(a) {
   const showStatus = (msg) => {
     if (pendingContextId === a.id) $ctxArtist.textContent = buildCtxSub(a) + (buildCtxSub(a) ? ' · ' : '') + msg;
   };
-  if (isRateLimited()) { showStatus('rate-limited'); return; }
   showStatus('fetching label…');
-  try {
-    const id = extractAlbumId(a.spotifyUrl);
-    if (!id) {
-      console.warn('[LPQ] fetchLabelForAlbum: could not extract album ID from', a.spotifyUrl);
-      a.label = ''; save();
-      if (pendingContextId === a.id) $ctxArtist.textContent = buildCtxSub(a);
-      return;
-    }
-    const token = await getSpotifyToken();
-    const res = await fetch(`https://api.spotify.com/v1/albums/${id}`, {
-      headers: { 'Authorization': 'Bearer ' + token },
-    });
-    if (!res.ok) {
-      console.warn('[LPQ] fetchLabelForAlbum: API returned', res.status, 'for', a.title, '(id:', id, ')');
-      if (res.status === 429) {
-        // Honour retry-after header; default to 2 hours if missing
-        const retryAfter = parseInt(res.headers.get('retry-after') || '7200', 10);
-        setRateLimit(Date.now() + retryAfter * 1000);
-        showStatus('rate-limited');
-      } else if (res.status === 404) {
-        a.label = ''; save();
-        if (pendingContextId === a.id) $ctxArtist.textContent = buildCtxSub(a);
-      } else {
-        showStatus(`fetch failed (${res.status})`);
-      }
-      return;
-    }
-    const d = await res.json();
-    a.label = d.label || ''; // '' = confirmed no label in Spotify
-    save();
-    if (pendingContextId === a.id) {
-      $ctxArtist.textContent = buildCtxSub(a);
-    }
-  } catch (err) {
-    console.warn('[LPQ] fetchLabelForAlbum error:', err);
-    showStatus('fetch error — see console');
-  }
+  a.label = await fetchLabelFromMusicBrainz(a.artist, a.title);
+  save();
+  if (pendingContextId === a.id) $ctxArtist.textContent = buildCtxSub(a);
 }
 
 function openContextMenu(id) {
@@ -629,8 +643,8 @@ function openContextMenu(id) {
   $ctxMoveToShelf.classList.toggle('visible', currentView === 'prerelease');
   $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
 
-  // Fetch label on-demand if not yet confirmed (null = untried; '' = no label in Spotify)
-  if (a.label == null && a.spotifyUrl && !a.spotifyUrl.includes('/prerelease/')) {
+  // Fetch label on-demand if not yet confirmed (null = untried; '' = no MusicBrainz match)
+  if (a.label == null && a.artist && a.title) {
     fetchLabelForAlbum(a);
   }
 
