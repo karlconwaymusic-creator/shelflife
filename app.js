@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v44'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v45'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -179,6 +179,40 @@ function extractAlbumId(url) {
 }
 
 async function fetchSpotifyAlbum(albumId, rawUrl) {
+  // /prerelease/ IDs are never in the catalog (always 404), so skip the
+  // catalog round-trips entirely: scrape the embed page (artist, date,
+  // 640px art) with oEmbed in parallel as a title/thumbnail safety net.
+  if (rawUrl.includes('/prerelease/')) {
+    const [meta, oe] = (await Promise.allSettled([
+      fetchPreReleaseMeta(rawUrl),
+      fetch('https://open.spotify.com/oembed?url=' + encodeURIComponent(rawUrl))
+        .then(r => (r.ok ? r.json() : null)),
+    ])).map(r => (r.status === 'fulfilled' ? r.value : null));
+
+    if (meta && (meta.artist || meta.releaseDate)) {
+      return {
+        title:       meta.title || oe?.title,
+        artist:      meta.artist || '',
+        art:         meta.art || oe?.thumbnail_url || null,
+        spotifyUrl:  rawUrl.split('?')[0],
+        year:        meta.releaseDate ? meta.releaseDate.slice(0, 4) : null,
+        releaseDate: meta.releaseDate,
+        label:       null,
+      };
+    }
+    if (!oe?.title) throw new Error('Album not found');
+    return {
+      title:         oe.title,
+      artist:        oe.author_name || '',
+      art:           oe.thumbnail_url ?? null,
+      spotifyUrl:    rawUrl.split('?')[0],
+      year:          null,
+      releaseDate:   null,
+      label:         null,
+      partialLookup: true, // scrape failed — artist/date need manual entry
+    };
+  }
+
   // Try the catalog API first — gives high-res art and full metadata
   try {
     const token = await getSpotifyToken();
@@ -237,24 +271,6 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
     console.log('[LPQ] no embed ID found in oEmbed html');
   }
 
-  // Pre-release URLs: the catalog knows nothing, but Spotify's own embed page
-  // server-renders full metadata (artist, release date, 640px art) in a JSON
-  // blob. Scrape it — this is what finally makes /prerelease/ links auto-fill.
-  if (rawUrl.includes('/prerelease/')) {
-    const meta = await fetchPreReleaseMeta(rawUrl);
-    if (meta && (meta.artist || meta.releaseDate)) {
-      return {
-        title:       d.title || meta.title,
-        artist:      meta.artist || '',
-        art:         meta.art || d.thumbnail_url || null,
-        spotifyUrl:  rawUrl.split('?')[0],
-        year:        meta.releaseDate ? meta.releaseDate.slice(0, 4) : null,
-        releaseDate: meta.releaseDate,
-        label:       null,
-      };
-    }
-  }
-
   // Genuine fallback — album truly not in catalog yet
   return {
     title:         d.title,
@@ -277,16 +293,18 @@ async function fetchPreReleaseMeta(prereleaseUrl) {
   const id = extractAlbumId(prereleaseUrl);
   if (!id) return null;
   const embedUrl = 'https://open.spotify.com/embed/prerelease/' + id;
+  // Each attempt gets a hard timeout so one slow relay can't stall the lookup.
+  const t = () => AbortSignal.timeout(4000);
   const attempts = [
-    // 1. Direct — cheap, fails fast on CORS, future-proof
-    async () => (await fetch(embedUrl)).text(),
-    // 2. allorigins JSON wrapper — verified working end-to-end
+    // 1. Direct — near-instant fail on CORS, future-proof if Spotify opens it
+    async () => (await fetch(embedUrl, { signal: t() })).text(),
+    // 2. corsproxy.io — fastest relay in live browser testing
+    async () => (await fetch('https://corsproxy.io/?url=' + encodeURIComponent(embedUrl), { signal: t() })).text(),
+    // 3. allorigins JSON wrapper — slower and flakier, last resort
     async () => {
-      const r = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(embedUrl));
+      const r = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(embedUrl), { signal: t() });
       return (await r.json()).contents;
     },
-    // 3. corsproxy.io — allows browser-origin requests on its free tier
-    async () => (await fetch('https://corsproxy.io/?url=' + encodeURIComponent(embedUrl))).text(),
   ];
   for (const attempt of attempts) {
     try {
@@ -929,6 +947,7 @@ function bindEvents() {
     fetchedAlbum = null;
     $submitBtn.disabled = true;
     $albumPreview.hidden = true;
+    $previewArt.removeAttribute('src'); // don't let the previous album's art flash
     $fetchError.hidden = true;
     $fetchLoading.hidden = true;
 
@@ -949,8 +968,9 @@ function bindEvents() {
           releaseDate: data.releaseDate ?? null,
           label:       data.label ?? null,
         };
-        $previewArt.src            = fetchedAlbum.art || '';
-        $previewArt.hidden         = !fetchedAlbum.art;
+        if (fetchedAlbum.art) $previewArt.src = fetchedAlbum.art;
+        else $previewArt.removeAttribute('src');
+        $previewArt.hidden = !fetchedAlbum.art;
         $previewTitle.textContent  = fetchedAlbum.title;
         const isVinyl = currentView === 'vinyl';
         // If opened from the Pre-Releases tab, always treat as pre-release —
@@ -1023,6 +1043,10 @@ function resetForm() {
   $form.reset();
   fetchedAlbum         = null;
   $albumPreview.hidden = true;
+  $previewArt.removeAttribute('src'); // clear old artwork so it can't flash on reopen
+  $previewArt.hidden   = true;
+  $previewTitle.textContent  = '';
+  $previewArtist.textContent = '';
   $fetchError.hidden   = true;
   $fetchError.classList.remove('fetch-error--info');
   $fetchLoading.hidden = true;
