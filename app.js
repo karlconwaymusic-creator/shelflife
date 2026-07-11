@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v40'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v44'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -237,6 +237,24 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
     console.log('[LPQ] no embed ID found in oEmbed html');
   }
 
+  // Pre-release URLs: the catalog knows nothing, but Spotify's own embed page
+  // server-renders full metadata (artist, release date, 640px art) in a JSON
+  // blob. Scrape it — this is what finally makes /prerelease/ links auto-fill.
+  if (rawUrl.includes('/prerelease/')) {
+    const meta = await fetchPreReleaseMeta(rawUrl);
+    if (meta && (meta.artist || meta.releaseDate)) {
+      return {
+        title:       d.title || meta.title,
+        artist:      meta.artist || '',
+        art:         meta.art || d.thumbnail_url || null,
+        spotifyUrl:  rawUrl.split('?')[0],
+        year:        meta.releaseDate ? meta.releaseDate.slice(0, 4) : null,
+        releaseDate: meta.releaseDate,
+        label:       null,
+      };
+    }
+  }
+
   // Genuine fallback — album truly not in catalog yet
   return {
     title:         d.title,
@@ -248,6 +266,70 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
     label:         null,
     partialLookup: true, // flag: only title+art retrieved; artist/date need manual entry
   };
+}
+
+// ─── Pre-release metadata scrape ──────────────────────────────────────────────
+// open.spotify.com/embed/prerelease/{id} embeds a __NEXT_DATA__ JSON blob with
+// entity.subtitle (artist), entity.releaseDate.isoString and full-size art.
+// The page itself sends no CORS headers, so a direct fetch only works if
+// Spotify ever relaxes that — we fall back to public CORS relays.
+async function fetchPreReleaseMeta(prereleaseUrl) {
+  const id = extractAlbumId(prereleaseUrl);
+  if (!id) return null;
+  const embedUrl = 'https://open.spotify.com/embed/prerelease/' + id;
+  const attempts = [
+    // 1. Direct — cheap, fails fast on CORS, future-proof
+    async () => (await fetch(embedUrl)).text(),
+    // 2. allorigins JSON wrapper — verified working end-to-end
+    async () => {
+      const r = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(embedUrl));
+      return (await r.json()).contents;
+    },
+    // 3. corsproxy.io — allows browser-origin requests on its free tier
+    async () => (await fetch('https://corsproxy.io/?url=' + encodeURIComponent(embedUrl))).text(),
+  ];
+  for (const attempt of attempts) {
+    try {
+      const html = await attempt();
+      if (!html) continue;
+      const m = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+      if (!m) continue;
+      const entity = JSON.parse(m[1])?.props?.pageProps?.state?.data?.entity;
+      if (!entity) continue;
+      const iso = entity.releaseDate?.isoString || null;
+      const images = entity.visualIdentity?.image || [];
+      const art = images.slice().sort((a, b) => (b.maxWidth || 0) - (a.maxWidth || 0))[0]?.url || null;
+      return {
+        title:       entity.title || entity.name || null,
+        artist:      entity.subtitle || null,
+        releaseDate: iso ? iso.slice(0, 10) : null,
+        art,
+      };
+    } catch (err) {
+      console.log('[LPQ] prerelease meta attempt failed:', err?.message || err);
+    }
+  }
+  return null;
+}
+
+// Backfill artist / release date for pre-releases saved before the embed-page
+// scrape existed (or added while all relays were down). Runs once per boot.
+async function backfillPreReleaseMeta() {
+  const needs = albums.filter(a =>
+    a.preRelease && a.spotifyUrl?.includes('/prerelease/') && (!a.artist || !a.releaseDate)
+  );
+  for (const a of needs) {
+    const meta = await fetchPreReleaseMeta(a.spotifyUrl);
+    if (!meta) continue;
+    let changed = false;
+    if (!a.artist && meta.artist)           { a.artist = meta.artist; changed = true; }
+    if (!a.releaseDate && meta.releaseDate) {
+      a.releaseDate = meta.releaseDate;
+      a.year = meta.releaseDate.slice(0, 4);
+      changed = true;
+    }
+    if (changed) { save(); render(); }
+  }
 }
 
 // ─── DOM ──────────────────────────────────────────────────────────────────────
@@ -330,6 +412,7 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
   applySettingsUI();
   backfillYears();
   backfillLabels();
+  backfillPreReleaseMeta().then(() => { checkPreReleases(); render(); }); // fresh date may trigger promotion
 
   // Restore the last active tab so a refresh doesn't bounce the user to shelf
   const savedView = sessionStorage.getItem('lpq-view');
