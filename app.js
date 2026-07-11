@@ -1,12 +1,13 @@
 'use strict';
 
-const APP_VERSION = 'v45'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v46'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
 let pendingContextId = null;
 let currentView = 'shelf';
 let fetchedAlbum = null;
+let lookupSeq = 0; // monotonic token — a URL lookup only applies if still current when it resolves
 
 const MAX_ALBUMS = 20; // hard ceiling; user limit is settings.shelfSize
 
@@ -944,10 +945,13 @@ function bindEvents() {
   let lookupTimer;
   $spotifyInput.addEventListener('input', () => {
     clearTimeout(lookupTimer);
+    const seq = ++lookupSeq; // invalidates any lookup still in flight
     fetchedAlbum = null;
     $submitBtn.disabled = true;
     $albumPreview.hidden = true;
     $previewArt.removeAttribute('src'); // don't let the previous album's art flash
+    $artistInput.value      = '';       // …nor its artist/date linger in the manual fields
+    $releaseDateInput.value = '';
     $fetchError.hidden = true;
     $fetchLoading.hidden = true;
 
@@ -959,6 +963,7 @@ function bindEvents() {
     lookupTimer = setTimeout(async () => {
       try {
         const data = await fetchSpotifyAlbum(albumId, rawUrl);
+        if (seq !== lookupSeq) return; // stale — user typed a new URL or closed the modal
         fetchedAlbum = {
           title:       data.title,
           artist:      data.artist,
@@ -1005,6 +1010,7 @@ function bindEvents() {
         $submitBtn.disabled   = false;
         $submitBtn.textContent = isVinyl ? 'Add to Vinyl' : isPre ? 'Add to Pre-Releases' : 'Add to Shelf';
       } catch {
+        if (seq !== lookupSeq) return; // stale failure — don't flash an error for it
         $fetchLoading.hidden  = true;
         $fetchError.textContent = 'Couldn\'t find that album — check the URL and try again.';
         $fetchError.hidden    = false;
@@ -1040,6 +1046,7 @@ function closeModal() {
 }
 
 function resetForm() {
+  lookupSeq++; // cancel any lookup still in flight so it can't repopulate the form
   $form.reset();
   fetchedAlbum         = null;
   $albumPreview.hidden = true;
