@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v52'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v53'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -168,6 +168,24 @@ function applySettingsUI() {
   $settingShopUrl.value      = settings.shopUrl;
   const $version = document.getElementById('appVersion');
   if ($version) $version.textContent = 'LPQ ' + APP_VERSION;
+  updateSpotifyUI();
+}
+
+// Reflect the current Spotify connection state in Settings.
+function updateSpotifyUI() {
+  if (!$spotifyStatus) return;
+  if (spotifyConnected()) {
+    const who = spProfile ? ` as ${spProfile.name}` : '';
+    $spotifyStatus.textContent = spProfile && !spProfile.premium
+      ? `Connected${who}, but tap-to-play needs Spotify Premium. Free accounts still open the album in Spotify.`
+      : `Connected${who}. Tap any album to start playing it on Spotify.`;
+    $spotifyConnect.hidden = true;
+    $spotifyDisconnect.hidden = false;
+  } else {
+    $spotifyStatus.textContent = 'Connect your Spotify account to play albums instantly when you tap them (Premium required).';
+    $spotifyConnect.hidden = false;
+    $spotifyDisconnect.hidden = true;
+  }
 }
 
 // ─── Spotify ──────────────────────────────────────────────────────────────────
@@ -191,6 +209,181 @@ async function getSpotifyToken() {
   spToken  = data.access_token;
   spExpiry = Date.now() + (data.expires_in - 60) * 1000;
   return spToken;
+}
+
+// ─── Spotify user auth (PKCE) + playback ───────────────────────────────────────
+// Anonymous client-credentials (above) can read the catalog but can't control
+// playback. Tap-to-play needs a user token, obtained via the Authorization Code
+// + PKCE flow (no client secret in the redirect — safe for a static SPA).
+// The redirect URI MUST be registered verbatim in the Spotify app dashboard.
+const REDIRECT_URI = 'https://karlconwaymusic-creator.github.io/shelflife/';
+const SP_SCOPES    = 'user-modify-playback-state user-read-playback-state user-read-private';
+let spUserToken  = null;
+let spUserExpiry = 0;
+let spProfile    = null; // { name, premium } once fetched
+
+const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf)))
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+async function sha256(str) {
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+}
+
+function randomString(len = 64) {
+  const bytes = crypto.getRandomValues(new Uint8Array(len));
+  return b64url(bytes).slice(0, len);
+}
+
+function spotifyConnected() { return !!localStorage.getItem('lpq-sp-refresh'); }
+
+// Kick off the OAuth redirect. Stores the PKCE verifier + CSRF state first.
+async function beginSpotifyAuth() {
+  const verifier  = randomString(64);
+  const state     = randomString(16);
+  const challenge = b64url(await sha256(verifier));
+  localStorage.setItem('lpq-sp-verifier', verifier);
+  localStorage.setItem('lpq-sp-state', state);
+  const params = new URLSearchParams({
+    client_id: SP_ID,
+    response_type: 'code',
+    redirect_uri: REDIRECT_URI,
+    code_challenge_method: 'S256',
+    code_challenge: challenge,
+    state,
+    scope: SP_SCOPES,
+  });
+  window.location.href = 'https://accounts.spotify.com/authorize?' + params;
+}
+
+// On load, if we came back from Spotify with ?code=, exchange it for tokens.
+// Returns true if a redirect was handled (so the caller can refresh the UI).
+async function handleSpotifyRedirect() {
+  const url = new URL(window.location.href);
+  const code  = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  if (!code) return false;
+  const cleanUrl = () => window.history.replaceState(null, '', REDIRECT_URI);
+
+  const savedState = localStorage.getItem('lpq-sp-state');
+  const verifier   = localStorage.getItem('lpq-sp-verifier');
+  localStorage.removeItem('lpq-sp-state');
+  localStorage.removeItem('lpq-sp-verifier');
+  if (!verifier || state !== savedState) { cleanUrl(); return false; } // CSRF / stale
+
+  try {
+    const res = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: REDIRECT_URI,
+        client_id: SP_ID,
+        code_verifier: verifier,
+      }),
+    });
+    if (!res.ok) { cleanUrl(); return false; }
+    const d = await res.json();
+    spUserToken  = d.access_token;
+    spUserExpiry = Date.now() + (d.expires_in - 60) * 1000;
+    if (d.refresh_token) localStorage.setItem('lpq-sp-refresh', d.refresh_token);
+  } catch { /* fall through */ }
+  cleanUrl();
+  return true;
+}
+
+// Return a valid user access token, refreshing via the stored refresh token
+// when needed. null if not connected or the refresh failed.
+async function getUserToken() {
+  if (spUserToken && Date.now() < spUserExpiry) return spUserToken;
+  const refresh = localStorage.getItem('lpq-sp-refresh');
+  if (!refresh) return null;
+  try {
+    const res = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refresh,
+        client_id: SP_ID,
+      }),
+    });
+    if (!res.ok) {
+      if (res.status === 400) disconnectSpotify(); // refresh token revoked/expired
+      return null;
+    }
+    const d = await res.json();
+    spUserToken  = d.access_token;
+    spUserExpiry = Date.now() + (d.expires_in - 60) * 1000;
+    if (d.refresh_token) localStorage.setItem('lpq-sp-refresh', d.refresh_token);
+    return spUserToken;
+  } catch { return null; }
+}
+
+function disconnectSpotify() {
+  localStorage.removeItem('lpq-sp-refresh');
+  spUserToken = null;
+  spUserExpiry = 0;
+  spProfile = null;
+}
+
+// Fetch display name + premium status for the Settings UI. Cached in spProfile.
+async function fetchSpotifyProfile() {
+  const token = await getUserToken();
+  if (!token) return null;
+  try {
+    const res = await fetch('https://api.spotify.com/v1/me', {
+      headers: { 'Authorization': 'Bearer ' + token },
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    spProfile = { name: d.display_name || d.id, premium: d.product === 'premium' };
+    return spProfile;
+  } catch { return null; }
+}
+
+// Start playing an album on the user's active Spotify device. Returns true on
+// success. On 401 refreshes once; on no-active-device retargets the first known
+// device. Any failure returns false so the caller can fall back to opening the app.
+async function startPlayback(contextUri) {
+  const play = async (deviceId) => {
+    const token = await getUserToken();
+    if (!token) return { ok: false, status: 0 };
+    const qs = deviceId ? '?device_id=' + deviceId : '';
+    return fetch('https://api.spotify.com/v1/me/player/play' + qs, {
+      method: 'PUT',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context_uri: contextUri }),
+    });
+  };
+  try {
+    let res = await play();
+    if (res.status === 401) { spUserExpiry = 0; res = await play(); } // force refresh
+    if (res.status === 404) {
+      // No active device — find one and retarget it
+      const token = await getUserToken();
+      const dRes = await fetch('https://api.spotify.com/v1/me/player/devices', {
+        headers: { 'Authorization': 'Bearer ' + token },
+      });
+      const devices = dRes.ok ? (await dRes.json()).devices : [];
+      if (devices.length) res = await play(devices[0].id);
+    }
+    return res.ok; // 204
+  } catch { return false; }
+}
+
+// Unified tap action: play through the API if connected & playable, else open Spotify.
+async function playOrOpen(a) {
+  if (!a?.spotifyUrl) return;
+  const id = extractAlbumId(a.spotifyUrl);
+  const playable = id && !a.spotifyUrl.includes('/prerelease/');
+  // spProfile?.premium !== false → try when premium or status not yet known
+  if (playable && spotifyConnected() && spProfile?.premium !== false) {
+    showToast('Starting playback…');
+    if (await startPlayback('spotify:album:' + id)) { showToast('Playing on Spotify'); return; }
+    // fall through to opening the app (no active device / not premium / error)
+  }
+  window.location.href = toSpotifyUri(a.spotifyUrl);
 }
 
 function extractAlbumId(url) {
@@ -411,6 +604,9 @@ const $settingArchive   = document.getElementById('settingArchive');
 const $settingShelfSize = document.getElementById('settingShelfSize');
 const $shelfSizeVal     = document.getElementById('shelfSizeVal');
 const $settingShopUrl   = document.getElementById('settingShopUrl');
+const $spotifyStatus    = document.getElementById('spotifyStatus');
+const $spotifyConnect   = document.getElementById('spotifyConnectBtn');
+const $spotifyDisconnect = document.getElementById('spotifyDisconnectBtn');
 const $preReleaseGrid  = document.getElementById('preReleaseGrid');
 const $preReleaseEmpty = document.getElementById('preReleaseEmpty');
 const $contextMenu   = document.getElementById('contextMenu');
@@ -468,6 +664,14 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
   backfillYears();
   backfillLabels();
   backfillPreReleaseMeta().then(() => { checkPreReleases(); render(); }); // fresh date may trigger promotion
+
+  // Complete a Spotify OAuth round-trip if we're returning from one, then
+  // (whether just-connected or already-connected) fetch the profile to show
+  // the display name + premium status in Settings.
+  handleSpotifyRedirect().then(async (returned) => {
+    if (returned) { switchView('settings'); showToast('Spotify connected'); }
+    if (spotifyConnected()) { await fetchSpotifyProfile(); updateSpotifyUI(); }
+  });
 
   // Restore the last active tab so a refresh doesn't bounce the user to shelf
   const savedView = sessionStorage.getItem('lpq-view');
@@ -898,7 +1102,7 @@ function bindEvents() {
     const card = e.target.closest('.album-card');
     if (!card || card.classList.contains('album-card--ghost')) return; // no Spotify tap on ghosts
     const a = albums.find(a => a.id === card.dataset.id);
-    if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
+    playOrOpen(a);
   });
 
   // ── Long press on pre-release grid (mirrors shelf) ───────────────────────
@@ -909,7 +1113,7 @@ function bindEvents() {
     const card = e.target.closest('.album-card');
     if (!card) return;
     const a = albums.find(a => a.id === card.dataset.id);
-    if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
+    playOrOpen(a); // pre-releases aren't playable — playOrOpen just opens the link
   });
 
   // ── Long press on archive mosaic (no tap action — menu only) ─────────────
@@ -923,7 +1127,7 @@ function bindEvents() {
     const row = e.target.closest('.vinyl-row');
     if (!row) return;
     const a = albums.find(a => a.id === row.dataset.id);
-    if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
+    playOrOpen(a);
   });
 
   // ── Context menu actions ──────────────────────────────────────────────────
@@ -1066,6 +1270,13 @@ function bindEvents() {
       settings.shopUrl = $settingShopUrl.value.trim() || SETTINGS_DEFAULTS.shopUrl;
       saveSettings();
     }, 600);
+  });
+
+  $spotifyConnect.addEventListener('click', () => beginSpotifyAuth());
+  $spotifyDisconnect.addEventListener('click', () => {
+    disconnectSpotify();
+    updateSpotifyUI();
+    showToast('Spotify disconnected');
   });
 
   // ── Spotify URL input ─────────────────────────────────────────────────────

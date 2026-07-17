@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="styles.css?v=52">
+  <link rel="stylesheet" href="styles.css?v=53">
   <!-- SW bootstrap — inline so it runs from the always-fresh index.html,
        not from potentially-stale cached app.js -->
   <script>
@@ -118,6 +118,13 @@
     <!-- Settings view -->
     <div id="viewSettings" class="view view--hidden">
       <div class="settings-list">
+
+        <div class="settings-row settings-row--col">
+          <div class="settings-title">Spotify Playback</div>
+          <div class="settings-desc" id="spotifyStatus">Connect your Spotify account to play albums instantly when you tap them (Premium required).</div>
+          <button id="spotifyConnectBtn" class="connect-btn">Connect Spotify</button>
+          <button id="spotifyDisconnectBtn" class="connect-btn connect-btn--secondary" hidden>Disconnect</button>
+        </div>
 
         <div class="settings-row">
           <div class="settings-label">
@@ -357,6 +364,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=52"></script>
+  <script src="app.js?v=53"></script>
 </body>
 </html>

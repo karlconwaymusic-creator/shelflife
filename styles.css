@@ -769,6 +769,29 @@ main { padding: 0; }
 
 .settings-input { margin-top: 2px; }
 
+/* Spotify connect button */
+.connect-btn {
+  margin-top: 4px;
+  align-self: flex-start;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 999px;
+  background: #1db954;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.1s, opacity 0.12s;
+}
+.connect-btn:active { transform: scale(0.96); }
+.connect-btn--secondary {
+  background: var(--surface2);
+  color: var(--text2);
+  font-weight: 600;
+}
+.connect-btn[hidden] { display: none; }
+
 /* Toggle switch */
 .toggle { display: flex; align-items: center; flex-shrink: 0; cursor: pointer; }
 .toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
