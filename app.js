@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v50'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v51'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -344,10 +344,16 @@ async function fetchPreReleaseMeta(prereleaseUrl) {
       return {
         title:       entity.title || entity.name || null,
         artist:      entity.subtitle || null,
-        // isoString is the release INSTANT in UTC (midnight local can be the
-        // previous day in UTC) — convert to the device's local calendar date,
-        // never slice the raw string, or albums promote a day early.
-        releaseDate: iso ? localISODate(new Date(iso)) : null,
+        // isoString is the release INSTANT — midnight of release day in some
+        // timezone that varies with the requesting vantage (we've observed
+        // 23:00Z day-before, 04:00Z, and 11:00Z day-before for one July 17
+        // release). The calendar date is the date at that instant in Earth's
+        // earliest timezone (UTC+14): add 14h, then take the UTC date. This is
+        // vantage- and device-timezone-independent; naive slicing was storing
+        // dates a day early and promoting albums before release.
+        releaseDate: iso
+          ? new Date(new Date(iso).getTime() + 14 * 3600 * 1000).toISOString().slice(0, 10)
+          : null,
         art,
       };
     } catch (err) {
