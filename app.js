@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v54'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v55'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -344,7 +344,9 @@ async function fetchSpotifyProfile() {
 
 // Start playing an album on the user's Spotify device. Returns { ok, reason }.
 // On 401 refreshes once; on no-active-device retargets the first known device.
-// reason ∈ 'ok' | 'no-token' | 'no-device' | 'premium' | 'http-<status>' | 'exception'.
+// reason is 'ok', 'no-token', 'no-device', or — for any other failure — the
+// literal reason/message Spotify's error body reports (e.g. PREMIUM_REQUIRED,
+// RESTRICTION_VIOLATED), never guessed from the HTTP status alone.
 async function startPlayback(contextUri) {
   const play = async (deviceId) => {
     const token = await getUserToken();
@@ -355,6 +357,13 @@ async function startPlayback(contextUri) {
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ context_uri: contextUri }),
     });
+  };
+  // Spotify error bodies look like {"error":{"status":403,"message":"...","reason":"PREMIUM_REQUIRED"}}
+  const parseError = async (res) => {
+    try {
+      const d = await res.clone().json();
+      return d?.error?.reason || d?.error?.message || null;
+    } catch { return null; }
   };
   try {
     let res = await play();
@@ -367,14 +376,15 @@ async function startPlayback(contextUri) {
         headers: { 'Authorization': 'Bearer ' + token },
       });
       const devices = dRes.ok ? (await dRes.json()).devices : [];
-      console.log('[LPQ] no active device; known devices:', devices.map(d => d.name));
+      console.log('[LPQ] no active device; known devices:',
+        devices.map(d => `${d.name} (${d.type}${d.is_active ? ', active' : ''}${d.is_restricted ? ', restricted' : ''})`));
       if (!devices.length) return { ok: false, reason: 'no-device' };
       res = await play(devices[0].id);
     }
     if (res.ok) return { ok: true, reason: 'ok' };
-    if (res.status === 403) return { ok: false, reason: 'premium' }; // usually non-Premium
-    console.warn('[LPQ] playback failed:', res.status, await res.text().catch(() => ''));
-    return { ok: false, reason: 'http-' + res.status };
+    const spReason = await parseError(res);
+    console.warn('[LPQ] playback failed:', res.status, spReason);
+    return { ok: false, reason: spReason || ('http-' + res.status) };
   } catch (e) {
     console.warn('[LPQ] playback exception:', e);
     return { ok: false, reason: 'exception' };
@@ -390,12 +400,12 @@ async function playOrOpen(a) {
     showToast('Starting playback…');
     const r = await startPlayback('spotify:album:' + id);
     if (r.ok) { showToast('Playing on Spotify'); return; }
-    if (r.reason === 'premium') { showToast('Playback needs Spotify Premium'); return; }
+    if (r.reason === 'PREMIUM_REQUIRED') { showToast('Playback needs Spotify Premium'); return; }
     if (r.reason === 'no-device') {
       // Nothing to play on — open the album so the phone becomes an active device
       showToast('No active device — opening Spotify, then tap again');
     } else {
-      showToast('Couldn\'t start playback (' + r.reason + ') — opening Spotify');
+      showToast('Couldn\'t start playback: ' + r.reason + ' — opening Spotify');
     }
   }
   window.location.href = toSpotifyUri(a.spotifyUrl);
