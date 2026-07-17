@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v53'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v54'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -342,13 +342,13 @@ async function fetchSpotifyProfile() {
   } catch { return null; }
 }
 
-// Start playing an album on the user's active Spotify device. Returns true on
-// success. On 401 refreshes once; on no-active-device retargets the first known
-// device. Any failure returns false so the caller can fall back to opening the app.
+// Start playing an album on the user's Spotify device. Returns { ok, reason }.
+// On 401 refreshes once; on no-active-device retargets the first known device.
+// reason ∈ 'ok' | 'no-token' | 'no-device' | 'premium' | 'http-<status>' | 'exception'.
 async function startPlayback(contextUri) {
   const play = async (deviceId) => {
     const token = await getUserToken();
-    if (!token) return { ok: false, status: 0 };
+    if (!token) return null;
     const qs = deviceId ? '?device_id=' + deviceId : '';
     return fetch('https://api.spotify.com/v1/me/player/play' + qs, {
       method: 'PUT',
@@ -358,18 +358,27 @@ async function startPlayback(contextUri) {
   };
   try {
     let res = await play();
-    if (res.status === 401) { spUserExpiry = 0; res = await play(); } // force refresh
+    if (!res) return { ok: false, reason: 'no-token' };
+    if (res.status === 401) { spUserExpiry = 0; res = await play(); } // token expired → refresh
     if (res.status === 404) {
-      // No active device — find one and retarget it
+      // No active device — look for any known device and retarget it
       const token = await getUserToken();
       const dRes = await fetch('https://api.spotify.com/v1/me/player/devices', {
         headers: { 'Authorization': 'Bearer ' + token },
       });
       const devices = dRes.ok ? (await dRes.json()).devices : [];
-      if (devices.length) res = await play(devices[0].id);
+      console.log('[LPQ] no active device; known devices:', devices.map(d => d.name));
+      if (!devices.length) return { ok: false, reason: 'no-device' };
+      res = await play(devices[0].id);
     }
-    return res.ok; // 204
-  } catch { return false; }
+    if (res.ok) return { ok: true, reason: 'ok' };
+    if (res.status === 403) return { ok: false, reason: 'premium' }; // usually non-Premium
+    console.warn('[LPQ] playback failed:', res.status, await res.text().catch(() => ''));
+    return { ok: false, reason: 'http-' + res.status };
+  } catch (e) {
+    console.warn('[LPQ] playback exception:', e);
+    return { ok: false, reason: 'exception' };
+  }
 }
 
 // Unified tap action: play through the API if connected & playable, else open Spotify.
@@ -377,11 +386,17 @@ async function playOrOpen(a) {
   if (!a?.spotifyUrl) return;
   const id = extractAlbumId(a.spotifyUrl);
   const playable = id && !a.spotifyUrl.includes('/prerelease/');
-  // spProfile?.premium !== false → try when premium or status not yet known
   if (playable && spotifyConnected() && spProfile?.premium !== false) {
     showToast('Starting playback…');
-    if (await startPlayback('spotify:album:' + id)) { showToast('Playing on Spotify'); return; }
-    // fall through to opening the app (no active device / not premium / error)
+    const r = await startPlayback('spotify:album:' + id);
+    if (r.ok) { showToast('Playing on Spotify'); return; }
+    if (r.reason === 'premium') { showToast('Playback needs Spotify Premium'); return; }
+    if (r.reason === 'no-device') {
+      // Nothing to play on — open the album so the phone becomes an active device
+      showToast('No active device — opening Spotify, then tap again');
+    } else {
+      showToast('Couldn\'t start playback (' + r.reason + ') — opening Spotify');
+    }
   }
   window.location.href = toSpotifyUri(a.spotifyUrl);
 }
