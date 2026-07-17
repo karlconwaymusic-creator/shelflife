@@ -482,6 +482,37 @@ main { padding: 0; }
 #ctxMoveToShelf         { display: none !important; }
 #ctxMoveToShelf.visible { display: flex !important; }
 
+/* Generic hide utility for context buttons — !important beats .context-btn{display:flex} */
+.context-btn--hidden    { display: none !important; }
+
+/* ─── Archive mosaic grid ─────────────────────────────────────────────────── */
+.archive-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
+}
+
+.archive-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  background: var(--surface);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Desaturated artwork signals archived rather than active */
+.archive-cell .album-art,
+.archive-cell .album-no-art {
+  filter: saturate(0.5);
+}
+
+.archive-cell .album-no-art { font-size: 1.4rem; }
+
 @media (min-width: 600px) {
   .context-menu { align-items: center; justify-content: center; }
   .context-sheet {

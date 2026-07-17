@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v46'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v47'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -356,7 +356,7 @@ const $shelf         = document.getElementById('shelf');
 const $empty         = document.getElementById('emptyState');
 const $vinylList     = document.getElementById('vinylList');
 const $vinylEmpty    = document.getElementById('vinylEmpty');
-const $archiveList   = document.getElementById('archiveList');
+const $archiveGrid   = document.getElementById('archiveGrid');
 const $archiveEmpty  = document.getElementById('archiveEmpty');
 const $modal         = document.getElementById('modal');
 const $overlay       = document.getElementById('overlay');
@@ -391,6 +391,8 @@ const $ctxVinylLbl   = document.getElementById('ctxVinylLabel');
 const $ctxMoveToShelf = document.getElementById('ctxMoveToShelf');
 const $ctxArchive    = document.getElementById('ctxArchive');
 const $ctxRemove     = document.getElementById('ctxRemove');
+const $ctxRestore    = document.getElementById('ctxRestore');
+const $ctxDelete     = document.getElementById('ctxDelete');
 const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
@@ -525,18 +527,36 @@ function renderVinyl() {
   }
 }
 
+// Dense crate-digging mosaic: artwork only, desaturated via CSS.
+// Artist/title and Restore/Delete actions live in the long-press menu.
 function renderArchive() {
   const archived = albums.filter(a => a.archived);
-  $archiveList.innerHTML = '';
+  $archiveGrid.innerHTML = '';
   $archiveEmpty.style.display = archived.length ? 'none' : 'flex';
 
   for (const a of archived) {
-    const row = makeListRow(a, [
-      { label: 'Restore', action() { restoreAlbum(a.id); } },
-      { label: 'Delete',  danger: true, action() { deleteFromArchive(a.id); } },
-    ]);
-    // No Spotify tap on archived thumbnails — use the shelf for that
-    $archiveList.appendChild(row);
+    const cell = document.createElement('div');
+    cell.className = 'archive-cell';
+    cell.dataset.id = a.id;
+    cell.setAttribute('role', 'listitem');
+    cell.setAttribute('aria-label', `${a.title} by ${a.artist}, archived`);
+
+    if (a.art) {
+      const img = document.createElement('img');
+      img.className = 'album-art';
+      img.src = a.art;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      cell.appendChild(img);
+    } else {
+      const noArt = document.createElement('div');
+      noArt.className = 'album-no-art';
+      noArt.textContent = '♪';
+      cell.appendChild(noArt);
+    }
+
+    $archiveGrid.appendChild(cell);
   }
 }
 
@@ -745,6 +765,14 @@ function openContextMenu(id) {
   $ctxMoveToShelf.classList.toggle('visible', currentView === 'prerelease');
   $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
 
+  // Archive view gets its own two actions; the regular ones are hidden there
+  const inArchive = currentView === 'archive';
+  $ctxVinyl.classList.toggle('context-btn--hidden', inArchive);
+  $ctxArchive.classList.toggle('context-btn--hidden', inArchive);
+  $ctxRemove.classList.toggle('context-btn--hidden', inArchive);
+  $ctxRestore.classList.toggle('context-btn--hidden', !inArchive);
+  $ctxDelete.classList.toggle('context-btn--hidden', !inArchive);
+
   // Fetch label on-demand if not yet confirmed (null = untried; '' = no MusicBrainz match)
   if (a.label == null && a.artist && a.title) {
     fetchLabelForAlbum(a);
@@ -848,6 +876,31 @@ function bindEvents() {
     if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
   });
 
+  // ── Long press on archive mosaic (no tap action — menu only) ─────────────
+  $archiveGrid.addEventListener('pointerdown', e => {
+    const cell = e.target.closest('.archive-cell');
+    if (!cell) return;
+    lpFired = false;
+    lpCard  = cell;
+    lpStart = { x: e.clientX, y: e.clientY };
+    cell.classList.add('album-card--pressing');
+    lpTimer = setTimeout(() => {
+      lpFired = true;
+      cell.classList.remove('album-card--pressing');
+      navigator.vibrate?.(12);
+      openContextMenu(cell.dataset.id);
+    }, 450);
+  });
+
+  $archiveGrid.addEventListener('pointermove', e => {
+    if (!lpStart) return;
+    if (Math.abs(e.clientX - lpStart.x) > 8 || Math.abs(e.clientY - lpStart.y) > 8) cancelLp();
+  });
+
+  $archiveGrid.addEventListener('pointerup',     cancelLp);
+  $archiveGrid.addEventListener('pointercancel', cancelLp);
+  $archiveGrid.addEventListener('contextmenu',   e => e.preventDefault());
+
   // ── Context menu actions ──────────────────────────────────────────────────
   $ctxMoveToShelf.addEventListener('click', () => {
     const id = pendingContextId;
@@ -892,6 +945,21 @@ function bindEvents() {
         showToast('Removed from shelf');
       }
     }, 180);
+  });
+
+  // Archive-view actions
+  $ctxRestore.addEventListener('click', () => {
+    const id = pendingContextId;
+    if (!id) return;
+    closeContextMenu();
+    setTimeout(() => restoreAlbum(id), 180); // shows its own toast if the shelf is full
+  });
+
+  $ctxDelete.addEventListener('click', () => {
+    const id = pendingContextId;
+    if (!id) return;
+    closeContextMenu();
+    setTimeout(() => { deleteFromArchive(id); showToast('Deleted'); }, 180);
   });
 
   // ── Overlay closes whatever is open ──────────────────────────────────────
