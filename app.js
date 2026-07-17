@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v48'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v49'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -136,6 +136,20 @@ async function backfillLabels() {
     if (pendingContextId === a.id) $ctxArtist.textContent = buildCtxSub(a);
   }
   if (changed) render();
+}
+
+// ─── Wikipedia ─────────────────────────────────────────────────────────────────
+// Search "TITLE ARTIST album" and return the direct article URL of the top hit.
+async function findWikipediaUrl(a) {
+  const query = `${a.title} ${a.artist} album`;
+  const url = 'https://en.wikipedia.org/w/api.php?action=query&list=search' +
+    `&srsearch=${encodeURIComponent(query)}&format=json&origin=*`;
+  const res = await fetch(url);
+  if (!res.ok) return null;
+  const d = await res.json();
+  const top = d.query?.search?.[0];
+  if (!top) return null;
+  return 'https://en.wikipedia.org/wiki/' + encodeURIComponent(top.title.replace(/ /g, '_'));
 }
 
 function applySettingsUI() {
@@ -386,6 +400,7 @@ const $ctxArtImg     = document.getElementById('contextArtImg');
 const $ctxNoArt      = document.getElementById('contextNoArt');
 const $ctxTitle      = document.getElementById('contextTitle');
 const $ctxArtist     = document.getElementById('contextArtist');
+const $ctxWiki       = document.getElementById('ctxWiki');
 const $ctxBuy        = document.getElementById('ctxBuy');
 const $ctxVinyl      = document.getElementById('ctxVinyl');
 const $ctxVinylLbl   = document.getElementById('ctxVinylLabel');
@@ -932,6 +947,30 @@ function bindEvents() {
     render();
     showToast('Moved to shelf');
     closeContextMenu();
+  });
+
+  $ctxWiki.addEventListener('click', async () => {
+    const id = pendingContextId;
+    if (!id) return;
+    const a = albums.find(a => a.id === id);
+    if (!a) return;
+    // Open the tab synchronously (within the user gesture) so the async
+    // Wikipedia lookup that follows doesn't trip popup blockers.
+    const win = window.open('about:blank', '_blank');
+    closeContextMenu();
+    try {
+      const url = await findWikipediaUrl(a);
+      if (url) {
+        if (win) win.location.href = url;
+        else window.location.href = url; // popup blocked — fall back to same tab
+      } else {
+        win?.close();
+        showToast('No Wikipedia article found');
+      }
+    } catch {
+      win?.close();
+      showToast('Couldn\'t reach Wikipedia');
+    }
   });
 
   $ctxBuy.addEventListener('click', () => {
