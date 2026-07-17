@@ -119,11 +119,15 @@ main { padding: 0; }
   transform: translateX(-50%) translateY(0);
   background: var(--surface2);
   border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 999px;
+  border-radius: 16px;
   color: var(--text);
   font-size: 0.85rem;
+  line-height: 1.35;
   padding: 10px 18px;
-  white-space: nowrap;
+  max-width: min(86vw, 360px);
+  width: max-content;
+  white-space: normal;
+  text-align: center;
   pointer-events: none;
   opacity: 1;
   transition: opacity 0.3s ease, transform 0.3s ease;

@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v55'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v56'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -342,11 +342,13 @@ async function fetchSpotifyProfile() {
   } catch { return null; }
 }
 
-// Start playing an album on the user's Spotify device. Returns { ok, reason }.
-// On 401 refreshes once; on no-active-device retargets the first known device.
-// reason is 'ok', 'no-token', 'no-device', or — for any other failure — the
-// literal reason/message Spotify's error body reports (e.g. PREMIUM_REQUIRED,
-// RESTRICTION_VIOLATED), never guessed from the HTTP status alone.
+// Start playing an album on the user's Spotify device. Returns { ok, reason, device }.
+// On 401 refreshes once. On no-active-device (404) OR the active device
+// refusing remote control (403 RESTRICTION_VIOLATED — e.g. some smart-speaker
+// integrations only accept local commands), retries against the first
+// *non-restricted* device Spotify knows about instead of giving up.
+// reason is 'ok', 'no-token', 'no-device', 'no-usable-device', or — for any
+// other failure — the literal reason/message Spotify's error body reports.
 async function startPlayback(contextUri) {
   const play = async (deviceId) => {
     const token = await getUserToken();
@@ -365,26 +367,40 @@ async function startPlayback(contextUri) {
       return d?.error?.reason || d?.error?.message || null;
     } catch { return null; }
   };
+  const listDevices = async () => {
+    const token = await getUserToken();
+    const dRes = await fetch('https://api.spotify.com/v1/me/player/devices', {
+      headers: { 'Authorization': 'Bearer ' + token },
+    });
+    return dRes.ok ? (await dRes.json()).devices : [];
+  };
   try {
     let res = await play();
     if (!res) return { ok: false, reason: 'no-token' };
     if (res.status === 401) { spUserExpiry = 0; res = await play(); } // token expired → refresh
-    if (res.status === 404) {
-      // No active device — look for any known device and retarget it
-      const token = await getUserToken();
-      const dRes = await fetch('https://api.spotify.com/v1/me/player/devices', {
-        headers: { 'Authorization': 'Bearer ' + token },
-      });
-      const devices = dRes.ok ? (await dRes.json()).devices : [];
-      console.log('[LPQ] no active device; known devices:',
-        devices.map(d => `${d.name} (${d.type}${d.is_active ? ', active' : ''}${d.is_restricted ? ', restricted' : ''})`));
-      if (!devices.length) return { ok: false, reason: 'no-device' };
-      res = await play(devices[0].id);
+
+    let firstReason = res.ok ? null : await parseError(res);
+    if (res.status === 404 || firstReason === 'RESTRICTION_VIOLATED') {
+      // Either nothing is active, or the active device won't accept remote
+      // commands — look for a device Spotify itself doesn't flag as restricted.
+      const devices = await listDevices();
+      console.log('[LPQ] retargeting device; known devices:',
+        devices.map(d => `${d.name} (${d.type}${d.is_active ? ', active' : ''}${d.is_restricted ? ', RESTRICTED' : ''})`));
+      const usable = devices.filter(d => !d.is_restricted);
+      if (!usable.length) {
+        return { ok: false, reason: devices.length ? 'no-usable-device' : 'no-device' };
+      }
+      const target = usable.find(d => d.is_active) || usable[0];
+      res = await play(target.id);
+      if (res.ok) return { ok: true, reason: 'ok', device: target.name };
+      const err = await parseError(res);
+      console.warn('[LPQ] retarget to', target.name, 'failed:', res.status, err);
+      return { ok: false, reason: err || ('http-' + res.status), device: target.name };
     }
+
     if (res.ok) return { ok: true, reason: 'ok' };
-    const spReason = await parseError(res);
-    console.warn('[LPQ] playback failed:', res.status, spReason);
-    return { ok: false, reason: spReason || ('http-' + res.status) };
+    console.warn('[LPQ] playback failed:', res.status, firstReason);
+    return { ok: false, reason: firstReason || ('http-' + res.status) };
   } catch (e) {
     console.warn('[LPQ] playback exception:', e);
     return { ok: false, reason: 'exception' };
@@ -399,13 +415,17 @@ async function playOrOpen(a) {
   if (playable && spotifyConnected() && spProfile?.premium !== false) {
     showToast('Starting playback…');
     const r = await startPlayback('spotify:album:' + id);
-    if (r.ok) { showToast('Playing on Spotify'); return; }
-    if (r.reason === 'PREMIUM_REQUIRED') { showToast('Playback needs Spotify Premium'); return; }
-    if (r.reason === 'no-device') {
-      // Nothing to play on — open the album so the phone becomes an active device
-      showToast('No active device — opening Spotify, then tap again');
+    if (r.ok) { showToast(r.device ? `Playing on ${r.device}` : 'Playing on Spotify'); return; }
+    // Full technical reason is already logged to console by startPlayback —
+    // keep these short so the toast is readable before it fades.
+    if (r.reason === 'PREMIUM_REQUIRED') {
+      showToast('Playback needs Spotify Premium', 4500);
+    } else if (r.reason === 'no-device') {
+      showToast('No active device — opening Spotify, then tap again', 4500);
+    } else if (r.reason === 'no-usable-device') {
+      showToast('No controllable device found — opening Spotify', 4500);
     } else {
-      showToast('Couldn\'t start playback: ' + r.reason + ' — opening Spotify');
+      showToast('Couldn\'t start playback — opening Spotify', 4500);
     }
   }
   window.location.href = toSpotifyUri(a.spotifyUrl);
@@ -709,7 +729,7 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 let toastTimer = null;
-function showToast(msg) {
+function showToast(msg, duration = 3000) {
   let $t = document.getElementById('toast');
   if (!$t) {
     $t = document.createElement('div');
@@ -720,7 +740,7 @@ function showToast(msg) {
   $t.textContent = msg;
   clearTimeout(toastTimer);
   $t.classList.remove('toast--hidden');
-  toastTimer = setTimeout(() => $t.classList.add('toast--hidden'), 3000);
+  toastTimer = setTimeout(() => $t.classList.add('toast--hidden'), duration);
 }
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
