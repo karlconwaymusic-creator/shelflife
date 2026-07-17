@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v47'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v48'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -386,6 +386,7 @@ const $ctxArtImg     = document.getElementById('contextArtImg');
 const $ctxNoArt      = document.getElementById('contextNoArt');
 const $ctxTitle      = document.getElementById('contextTitle');
 const $ctxArtist     = document.getElementById('contextArtist');
+const $ctxBuy        = document.getElementById('ctxBuy');
 const $ctxVinyl      = document.getElementById('ctxVinyl');
 const $ctxVinylLbl   = document.getElementById('ctxVinylLabel');
 const $ctxMoveToShelf = document.getElementById('ctxMoveToShelf');
@@ -508,22 +509,43 @@ function renderShelf() {
   }
 }
 
+// Vinyl wishlist: large square artwork on the left, artist/title/year beside.
+// Buy and Remove live in the long-press menu (same pattern as the shelf).
 function renderVinyl() {
   const vinyl = albums.filter(a => a.vinyl);
   $vinylList.innerHTML = '';
   $vinylEmpty.style.display = vinyl.length ? 'none' : 'flex';
 
   for (const a of vinyl) {
-    $vinylList.appendChild(makeListRow(a, [
-      {
-        label: 'Buy',
-        action() {
-          const base = settings.shopUrl || SETTINGS_DEFAULTS.shopUrl;
-          window.open(base + encodeURIComponent(a.artist + ' ' + a.title), '_blank');
-        },
-      },
-      { label: 'Remove', action() { toggleVinyl(a.id); renderVinyl(); } },
-    ]));
+    const row = document.createElement('div');
+    row.className = 'vinyl-row';
+    row.dataset.id = a.id;
+    row.setAttribute('role', 'listitem');
+    row.setAttribute('aria-label', `${a.title} by ${a.artist}`);
+
+    const art = document.createElement('div');
+    art.className = 'vinyl-art';
+    if (a.art) {
+      const img = document.createElement('img');
+      img.src = a.art;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      art.appendChild(img);
+    } else {
+      art.classList.add('vinyl-art--empty');
+      art.textContent = '♪';
+    }
+
+    const meta = document.createElement('div');
+    meta.className = 'vinyl-meta';
+    meta.innerHTML =
+      `<div class="vinyl-title">${esc(a.title)}</div>` +
+      `<div class="vinyl-artist">${esc(a.artist)}</div>` +
+      (a.year ? `<div class="vinyl-year">${esc(a.year)}</div>` : '');
+
+    row.append(art, meta);
+    $vinylList.appendChild(row);
   }
 }
 
@@ -594,44 +616,6 @@ function renderPreRelease() {
 
     $preReleaseGrid.appendChild(card);
   }
-}
-
-function makeListRow(a, actions) {
-  const row = document.createElement('div');
-  row.className = 'list-row';
-
-  const thumb = document.createElement('div');
-  thumb.className = 'list-thumb';
-  if (a.art) {
-    const img = document.createElement('img');
-    img.src = a.art;
-    img.alt = '';
-    img.loading = 'lazy';
-    thumb.appendChild(img);
-  } else {
-    thumb.classList.add('list-thumb--empty');
-    thumb.textContent = '♪';
-  }
-
-  const meta = document.createElement('div');
-  meta.className = 'list-meta';
-  const sub = a.artist + (a.year ? ` · ${a.year}` : '');
-  meta.innerHTML =
-    `<div class="list-title">${esc(a.title)}</div>` +
-    `<div class="list-artist">${esc(sub)}</div>`;
-
-  const actionsEl = document.createElement('div');
-  actionsEl.className = 'list-actions';
-  for (const { label, danger, action } of actions) {
-    const btn = document.createElement('button');
-    btn.className = 'list-btn' + (danger ? ' list-btn--danger' : '');
-    btn.textContent = label;
-    btn.addEventListener('click', action);
-    actionsEl.appendChild(btn);
-  }
-
-  row.append(thumb, meta, actionsEl);
-  return row;
 }
 
 function esc(s) {
@@ -765,11 +749,13 @@ function openContextMenu(id) {
   $ctxMoveToShelf.classList.toggle('visible', currentView === 'prerelease');
   $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
 
-  // Archive view gets its own two actions; the regular ones are hidden there
+  // Each view exposes its own set of actions in the long-press menu.
   const inArchive = currentView === 'archive';
-  $ctxVinyl.classList.toggle('context-btn--hidden', inArchive);
-  $ctxArchive.classList.toggle('context-btn--hidden', inArchive);
-  $ctxRemove.classList.toggle('context-btn--hidden', inArchive);
+  const inVinyl   = currentView === 'vinyl';
+  $ctxBuy.classList.toggle('context-btn--hidden', !inVinyl);                // Buy: vinyl only
+  $ctxVinyl.classList.toggle('context-btn--hidden', inArchive);            // in vinyl reads "Remove from Vinyl"
+  $ctxArchive.classList.toggle('context-btn--hidden', inArchive || inVinyl);
+  $ctxRemove.classList.toggle('context-btn--hidden', inArchive || inVinyl);
   $ctxRestore.classList.toggle('context-btn--hidden', !inArchive);
   $ctxDelete.classList.toggle('context-btn--hidden', !inArchive);
 
@@ -901,6 +887,39 @@ function bindEvents() {
   $archiveGrid.addEventListener('pointercancel', cancelLp);
   $archiveGrid.addEventListener('contextmenu',   e => e.preventDefault());
 
+  // ── Long press on vinyl rows (mirrors shelf) ─────────────────────────────
+  $vinylList.addEventListener('pointerdown', e => {
+    const row = e.target.closest('.vinyl-row');
+    if (!row) return;
+    lpFired = false;
+    lpCard  = row;
+    lpStart = { x: e.clientX, y: e.clientY };
+    row.classList.add('album-card--pressing');
+    lpTimer = setTimeout(() => {
+      lpFired = true;
+      row.classList.remove('album-card--pressing');
+      navigator.vibrate?.(12);
+      openContextMenu(row.dataset.id);
+    }, 450);
+  });
+
+  $vinylList.addEventListener('pointermove', e => {
+    if (!lpStart) return;
+    if (Math.abs(e.clientX - lpStart.x) > 8 || Math.abs(e.clientY - lpStart.y) > 8) cancelLp();
+  });
+
+  $vinylList.addEventListener('pointerup',     cancelLp);
+  $vinylList.addEventListener('pointercancel', cancelLp);
+  $vinylList.addEventListener('contextmenu',   e => e.preventDefault());
+
+  $vinylList.addEventListener('click', e => {
+    if (lpFired) { lpFired = false; return; }
+    const row = e.target.closest('.vinyl-row');
+    if (!row) return;
+    const a = albums.find(a => a.id === row.dataset.id);
+    if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
+  });
+
   // ── Context menu actions ──────────────────────────────────────────────────
   $ctxMoveToShelf.addEventListener('click', () => {
     const id = pendingContextId;
@@ -912,6 +931,16 @@ function bindEvents() {
     save();
     render();
     showToast('Moved to shelf');
+    closeContextMenu();
+  });
+
+  $ctxBuy.addEventListener('click', () => {
+    const id = pendingContextId;
+    if (!id) return;
+    const a = albums.find(a => a.id === id);
+    if (!a) return;
+    const base = settings.shopUrl || SETTINGS_DEFAULTS.shopUrl;
+    window.open(base + encodeURIComponent(a.artist + ' ' + a.title), '_blank');
     closeContextMenu();
   });
 
