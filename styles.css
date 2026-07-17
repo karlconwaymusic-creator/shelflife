@@ -213,6 +213,34 @@ main { padding: 0; }
 }
 
 
+/* ─── Ghost card — released on a full shelf, lives in archive ─────────────── */
+.album-card--ghost {
+  cursor: default;
+}
+.album-card--ghost .album-art,
+.album-card--ghost .album-no-art {
+  opacity: 0.4;
+  filter: saturate(0.35);
+}
+.ghost-badge {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-8deg);
+  padding: 4px 9px;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1.5px solid rgba(255, 255, 255, 0.65);
+  border-radius: 6px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: rgba(255, 255, 255, 0.92);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+
 /* ─── Empty state ─────────────────────────────────────────────────────────── */
 .empty-state {
   display: flex;

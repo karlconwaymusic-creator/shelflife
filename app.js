@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v49'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v50'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -36,6 +36,11 @@ function saveSettings() {
 function checkPreReleases() {
   let changed = false;
   for (const a of albums) {
+    // Expire ghost cards (shelf placeholders for releases archived on a full shelf)
+    if (a.ghostUntil && Date.now() >= a.ghostUntil) {
+      delete a.ghostUntil;
+      changed = true;
+    }
     if (!a.preRelease) continue;
     // Never auto-promote if we don't have a date to check against
     if (!a.releaseDate && !a.spotifyUrl?.includes('/prerelease/')) continue;
@@ -45,7 +50,11 @@ function checkPreReleases() {
         x => !x.archived && !x.preRelease && !x.detached
       ).length >= settings.shelfSize;
       a.preRelease = false;
-      if (shelfFull) a.archived = true; // no room — go straight to archive
+      if (shelfFull) {
+        // No room — archive it, but leave a 7-day ghost card on the shelf
+        a.archived   = true;
+        a.ghostUntil = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      }
       changed = true;
     }
   }
@@ -335,7 +344,10 @@ async function fetchPreReleaseMeta(prereleaseUrl) {
       return {
         title:       entity.title || entity.name || null,
         artist:      entity.subtitle || null,
-        releaseDate: iso ? iso.slice(0, 10) : null,
+        // isoString is the release INSTANT in UTC (midnight local can be the
+        // previous day in UTC) — convert to the device's local calendar date,
+        // never slice the raw string, or albums promote a day early.
+        releaseDate: iso ? localISODate(new Date(iso)) : null,
         art,
       };
     } catch (err) {
@@ -345,18 +357,18 @@ async function fetchPreReleaseMeta(prereleaseUrl) {
   return null;
 }
 
-// Backfill artist / release date for pre-releases saved before the embed-page
-// scrape existed (or added while all relays were down). Runs once per boot.
+// Refresh artist / release date for every pre-release with a /prerelease/ URL,
+// once per boot. Always re-scrapes rather than only filling gaps: it corrects
+// dates stored a day early by the old UTC-slicing bug, and picks up release
+// dates Spotify has shifted since the album was added.
 async function backfillPreReleaseMeta() {
-  const needs = albums.filter(a =>
-    a.preRelease && a.spotifyUrl?.includes('/prerelease/') && (!a.artist || !a.releaseDate)
-  );
+  const needs = albums.filter(a => a.preRelease && a.spotifyUrl?.includes('/prerelease/'));
   for (const a of needs) {
     const meta = await fetchPreReleaseMeta(a.spotifyUrl);
     if (!meta) continue;
     let changed = false;
-    if (!a.artist && meta.artist)           { a.artist = meta.artist; changed = true; }
-    if (!a.releaseDate && meta.releaseDate) {
+    if (!a.artist && meta.artist) { a.artist = meta.artist; changed = true; }
+    if (meta.releaseDate && a.releaseDate !== meta.releaseDate) {
       a.releaseDate = meta.releaseDate;
       a.year = meta.releaseDate.slice(0, 4);
       changed = true;
@@ -495,15 +507,20 @@ function render() {
 
 function renderShelf() {
   const active = albums.filter(a => !a.archived && !a.preRelease && !a.detached);
+  // Ghosts: releases that hit their date on a full shelf — archived, but shown
+  // here as inert placeholders for 7 days so the release doesn't slip by unseen.
+  const ghosts = albums.filter(a => a.archived && a.ghostUntil && Date.now() < a.ghostUntil);
   $shelf.innerHTML = '';
-  $empty.style.display = active.length ? 'none' : 'flex';
+  $empty.style.display = (active.length || ghosts.length) ? 'none' : 'flex';
 
-  for (const a of active) {
+  const buildCard = (a, ghost) => {
     const card = document.createElement('div');
-    card.className = 'album-card';
+    card.className = 'album-card' + (ghost ? ' album-card--ghost' : '');
     card.dataset.id = a.id;
     card.setAttribute('role', 'listitem');
-    card.setAttribute('aria-label', `${a.title} by ${a.artist}${a.spotifyUrl ? ' — opens Spotify' : ''}`);
+    card.setAttribute('aria-label', ghost
+      ? `${a.title} by ${a.artist} — released but shelf was full, now in archive`
+      : `${a.title} by ${a.artist}${a.spotifyUrl ? ' — opens Spotify' : ''}`);
 
     if (a.art) {
       const img = document.createElement('img');
@@ -520,8 +537,18 @@ function renderShelf() {
       card.appendChild(noArt);
     }
 
+    if (ghost) {
+      const badge = document.createElement('div');
+      badge.className = 'ghost-badge';
+      badge.textContent = 'Shelf Full';
+      card.appendChild(badge);
+    }
+
     $shelf.appendChild(card);
-  }
+  };
+
+  for (const a of active) buildCard(a, false);
+  for (const a of ghosts) buildCard(a, true);
 }
 
 // Vinyl wishlist: large square artwork on the left, artist/title/year beside.
@@ -666,6 +693,7 @@ function restoreAlbum(id) {
   const a = albums.find(a => a.id === id);
   if (!a) return;
   a.archived = false;
+  delete a.ghostUntil; // it's a real shelf card now — no placeholder needed
   save();
   render();
 }
@@ -684,6 +712,7 @@ function deleteFromArchive(id) {
   if (a.vinyl) {
     a.archived = false;
     a.detached = true; // vinyl-only: hidden from shelf/archive, visible in vinyl
+    delete a.ghostUntil;
   } else {
     albums = albums.filter(x => x.id !== id);
   }
@@ -814,7 +843,7 @@ function bindEvents() {
   // ── Long press on shelf ───────────────────────────────────────────────────
   $shelf.addEventListener('pointerdown', e => {
     const card = e.target.closest('.album-card');
-    if (!card) return;
+    if (!card || card.classList.contains('album-card--ghost')) return; // ghosts are inert
     lpFired = false;
     lpCard  = card;
     lpStart = { x: e.clientX, y: e.clientY };
@@ -839,7 +868,7 @@ function bindEvents() {
   $shelf.addEventListener('click', e => {
     if (lpFired) { lpFired = false; return; }
     const card = e.target.closest('.album-card');
-    if (!card) return;
+    if (!card || card.classList.contains('album-card--ghost')) return; // no Spotify tap on ghosts
     const a = albums.find(a => a.id === card.dataset.id);
     if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
   });
@@ -1260,6 +1289,15 @@ function toSpotifyUri(url) {
   return url;
 }
 
+// Local calendar date as YYYY-MM-DD. All release-date logic must use this,
+// never toISOString() — UTC's date can differ from the device's, which made
+// pre-releases promote a day early (e.g. a July 17 midnight release in Ireland
+// is 2026-07-16T23:00:00Z in UTC).
+function localISODate(d = new Date()) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 // Returns true if the album should live in the Pre-Releases section.
 // Checks release date (if known) OR the Spotify URL path (/prerelease/).
 function isPreRelease(releaseDate, spotifyUrl) {
@@ -1267,7 +1305,7 @@ function isPreRelease(releaseDate, spotifyUrl) {
   if (releaseDate) {
     const parts = releaseDate.split('-');
     const pastYear = parts.length === 1 && parseInt(parts[0]) <= new Date().getFullYear();
-    const pastDate = parts.length > 1 && releaseDate <= new Date().toISOString().slice(0, 10);
+    const pastDate = parts.length > 1 && releaseDate <= localISODate();
     if (pastYear || pastDate) return false;
   }
   // No confirmed past date — URL pattern is the next best signal

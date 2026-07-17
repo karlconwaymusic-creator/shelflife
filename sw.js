@@ -1,10 +1,10 @@
 // LPQ service worker — network-first for app shell, network-only for external images
-const CACHE = 'lpq-v49';
+const CACHE = 'lpq-v50';
 const SHELL = [
   './',
   './index.html',
-  './styles.css?v=49',
-  './app.js?v=49',
+  './styles.css?v=50',
+  './app.js?v=50',
   './manifest.json',
   './icon.svg',
   './icon-maskable.svg',
