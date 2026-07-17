@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v56'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v57'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -343,10 +343,14 @@ async function fetchSpotifyProfile() {
 }
 
 // Start playing an album on the user's Spotify device. Returns { ok, reason, device }.
-// On 401 refreshes once. On no-active-device (404) OR the active device
-// refusing remote control (403 RESTRICTION_VIOLATED — e.g. some smart-speaker
-// integrations only accept local commands), retries against the first
-// *non-restricted* device Spotify knows about instead of giving up.
+// Tries the account's current target first; if that's unavailable (no active
+// device) or refuses remote control (RESTRICTION_VIOLATED — some Connect
+// integrations, e.g. certain smart speakers, only accept commands from the
+// official Spotify app), walks every other *non-restricted* device Spotify
+// knows about, waking each with a transfer call before retrying if it looks
+// idle (404). This is what lets a tap succeed on whichever of your devices
+// — earbuds via phone, Sonos, phone speaker — actually accepts the command,
+// without you having to know in advance which one that is.
 // reason is 'ok', 'no-token', 'no-device', 'no-usable-device', or — for any
 // other failure — the literal reason/message Spotify's error body reports.
 async function startPlayback(contextUri) {
@@ -358,6 +362,15 @@ async function startPlayback(contextUri) {
       method: 'PUT',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ context_uri: contextUri }),
+    });
+  };
+  const transferTo = async (deviceId) => {
+    const token = await getUserToken();
+    if (!token) return;
+    await fetch('https://api.spotify.com/v1/me/player', {
+      method: 'PUT',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_ids: [deviceId], play: false }),
     });
   };
   // Spotify error bodies look like {"error":{"status":403,"message":"...","reason":"PREMIUM_REQUIRED"}}
@@ -374,33 +387,49 @@ async function startPlayback(contextUri) {
     });
     return dRes.ok ? (await dRes.json()).devices : [];
   };
-  try {
-    let res = await play();
+  // One attempt against a specific device (or the account default if deviceId
+  // is undefined); handles the 401→refresh→retry dance internally.
+  const attempt = async (deviceId, label) => {
+    let res = await play(deviceId);
     if (!res) return { ok: false, reason: 'no-token' };
-    if (res.status === 401) { spUserExpiry = 0; res = await play(); } // token expired → refresh
+    if (res.status === 401) { spUserExpiry = 0; res = await play(deviceId); }
+    if (res.ok) return { ok: true, reason: 'ok', device: label };
+    return { ok: false, status: res.status, reason: await parseError(res), device: label };
+  };
 
-    let firstReason = res.ok ? null : await parseError(res);
-    if (res.status === 404 || firstReason === 'RESTRICTION_VIOLATED') {
-      // Either nothing is active, or the active device won't accept remote
-      // commands — look for a device Spotify itself doesn't flag as restricted.
-      const devices = await listDevices();
-      console.log('[LPQ] retargeting device; known devices:',
-        devices.map(d => `${d.name} (${d.type}${d.is_active ? ', active' : ''}${d.is_restricted ? ', RESTRICTED' : ''})`));
-      const usable = devices.filter(d => !d.is_restricted);
-      if (!usable.length) {
-        return { ok: false, reason: devices.length ? 'no-usable-device' : 'no-device' };
-      }
-      const target = usable.find(d => d.is_active) || usable[0];
-      res = await play(target.id);
-      if (res.ok) return { ok: true, reason: 'ok', device: target.name };
-      const err = await parseError(res);
-      console.warn('[LPQ] retarget to', target.name, 'failed:', res.status, err);
-      return { ok: false, reason: err || ('http-' + res.status), device: target.name };
+  try {
+    let result = await attempt(undefined, null); // let Spotify pick — usually correct
+    if (result.ok) return result;
+
+    const needsRetarget = result.status === 404 || result.reason === 'RESTRICTION_VIOLATED';
+    if (!needsRetarget) {
+      console.warn('[LPQ] playback failed:', result.status, result.reason);
+      return result;
     }
 
-    if (res.ok) return { ok: true, reason: 'ok' };
-    console.warn('[LPQ] playback failed:', res.status, firstReason);
-    return { ok: false, reason: firstReason || ('http-' + res.status) };
+    const devices = await listDevices();
+    console.log('[LPQ] retargeting; known devices:',
+      devices.map(d => `${d.name} (${d.type}${d.is_active ? ', active' : ''}${d.is_restricted ? ', RESTRICTED' : ''})`));
+    const usable = devices.filter(d => !d.is_restricted);
+    if (!usable.length) return { ok: false, reason: devices.length ? 'no-usable-device' : 'no-device' };
+
+    // Try the active one first (most likely to be the earbuds/speaker in use),
+    // then every other usable device in order, until one actually accepts it.
+    const ordered = [...usable.filter(d => d.is_active), ...usable.filter(d => !d.is_active)];
+    for (const d of ordered) {
+      let r = await attempt(d.id, d.name);
+      if (r.ok) return r;
+      if (r.status === 404) {
+        // Device known but not "woken" yet — transfer playback to it first, then retry once
+        await transferTo(d.id);
+        await new Promise(res => setTimeout(res, 400));
+        r = await attempt(d.id, d.name);
+        if (r.ok) return r;
+      }
+      result = r;
+    }
+    console.warn('[LPQ] all devices failed; last:', result.status, result.reason, 'on', result.device);
+    return result;
   } catch (e) {
     console.warn('[LPQ] playback exception:', e);
     return { ok: false, reason: 'exception' };
@@ -425,7 +454,10 @@ async function playOrOpen(a) {
     } else if (r.reason === 'no-usable-device') {
       showToast('No controllable device found — opening Spotify', 4500);
     } else {
-      showToast('Couldn\'t start playback — opening Spotify', 4500);
+      // Show the real reason (not a generic message) — this is the only
+      // diagnostic channel available without connecting dev tools to the phone.
+      const detail = r.device ? `${r.reason} on ${r.device}` : (r.reason || 'unknown error');
+      showToast(`Couldn't play — ${detail}. Opening Spotify.`, 5000);
     }
   }
   window.location.href = toSpotifyUri(a.spotifyUrl);
