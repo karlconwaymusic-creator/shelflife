@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v51'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v52'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -534,6 +534,8 @@ function renderShelf() {
       img.src = a.art;
       img.alt = '';
       img.loading = 'lazy';
+      img.width  = 640;   // explicit intrinsic size — image load can never reflow the grid
+      img.height = 640;
       img.decoding = 'async';
       card.appendChild(img);
     } else {
@@ -578,6 +580,8 @@ function renderVinyl() {
       img.src = a.art;
       img.alt = '';
       img.loading = 'lazy';
+      img.width  = 640;   // explicit intrinsic size — image load can never reflow the grid
+      img.height = 640;
       img.decoding = 'async';
       art.appendChild(img);
     } else {
@@ -617,6 +621,8 @@ function renderArchive() {
       img.src = a.art;
       img.alt = '';
       img.loading = 'lazy';
+      img.width  = 640;   // explicit intrinsic size — image load can never reflow the grid
+      img.height = 640;
       img.decoding = 'async';
       cell.appendChild(img);
     } else {
@@ -648,6 +654,8 @@ function renderPreRelease() {
       img.src = a.art;
       img.alt = '';
       img.loading = 'lazy';
+      img.width  = 640;   // explicit intrinsic size — image load can never reflow the grid
+      img.height = 640;
       img.decoding = 'async';
       card.appendChild(img);
     } else {
@@ -827,16 +835,52 @@ function closeContextMenu() {
 }
 
 // ─── Long press ───────────────────────────────────────────────────────────────
-let lpTimer = null;
-let lpFired = false;
-let lpStart = null;
-let lpCard  = null;
+let lpTimer      = null;
+let lpPressTimer = null;
+let lpFired      = false;
+let lpStart      = null;
+let lpCard       = null;
 
 function cancelLp() {
   clearTimeout(lpTimer);
+  clearTimeout(lpPressTimer);
   lpCard?.classList.remove('album-card--pressing');
   lpStart = null;
   lpCard  = null;
+}
+
+// Shared long-press starter for every album surface. The press-scale visual is
+// DELAYED 120ms so a touch that immediately becomes a scroll never scales the
+// card — cards must stay perfectly still while the user scrolls the grid.
+function startLongPress(el, e) {
+  lpFired = false;
+  lpCard  = el;
+  lpStart = { x: e.clientX, y: e.clientY };
+  lpPressTimer = setTimeout(() => el.classList.add('album-card--pressing'), 120);
+  lpTimer = setTimeout(() => {
+    lpFired = true;
+    el.classList.remove('album-card--pressing');
+    navigator.vibrate?.(12);
+    openContextMenu(el.dataset.id);
+  }, 450);
+}
+
+// Attach the pointer lifecycle (down/move/up/cancel + suppressed contextmenu)
+// to a grid container. `cardSelector` picks the pressable element; `skip`
+// optionally marks cards that should stay inert (e.g. ghost cards).
+function bindLongPress(container, cardSelector, skip) {
+  container.addEventListener('pointerdown', e => {
+    const el = e.target.closest(cardSelector);
+    if (!el || (skip && skip(el))) return;
+    startLongPress(el, e);
+  });
+  container.addEventListener('pointermove', e => {
+    if (!lpStart) return;
+    if (Math.abs(e.clientX - lpStart.x) > 8 || Math.abs(e.clientY - lpStart.y) > 8) cancelLp();
+  });
+  container.addEventListener('pointerup',     cancelLp);
+  container.addEventListener('pointercancel', cancelLp);
+  container.addEventListener('contextmenu',   e => e.preventDefault());
 }
 
 // ─── Event wiring ─────────────────────────────────────────────────────────────
@@ -846,30 +890,8 @@ function bindEvents() {
     btn.addEventListener('click', () => switchView(btn.dataset.view));
   });
 
-  // ── Long press on shelf ───────────────────────────────────────────────────
-  $shelf.addEventListener('pointerdown', e => {
-    const card = e.target.closest('.album-card');
-    if (!card || card.classList.contains('album-card--ghost')) return; // ghosts are inert
-    lpFired = false;
-    lpCard  = card;
-    lpStart = { x: e.clientX, y: e.clientY };
-    card.classList.add('album-card--pressing');
-    lpTimer = setTimeout(() => {
-      lpFired = true;
-      card.classList.remove('album-card--pressing');
-      navigator.vibrate?.(12);
-      openContextMenu(card.dataset.id);
-    }, 450);
-  });
-
-  $shelf.addEventListener('pointermove', e => {
-    if (!lpStart) return;
-    if (Math.abs(e.clientX - lpStart.x) > 8 || Math.abs(e.clientY - lpStart.y) > 8) cancelLp();
-  });
-
-  $shelf.addEventListener('pointerup',     cancelLp);
-  $shelf.addEventListener('pointercancel', cancelLp);
-  $shelf.addEventListener('contextmenu',   e => e.preventDefault());
+  // ── Long press on shelf (ghost cards are inert) ───────────────────────────
+  bindLongPress($shelf, '.album-card', el => el.classList.contains('album-card--ghost'));
 
   $shelf.addEventListener('click', e => {
     if (lpFired) { lpFired = false; return; }
@@ -880,29 +902,7 @@ function bindEvents() {
   });
 
   // ── Long press on pre-release grid (mirrors shelf) ───────────────────────
-  $preReleaseGrid.addEventListener('pointerdown', e => {
-    const card = e.target.closest('.album-card');
-    if (!card) return;
-    lpFired = false;
-    lpCard  = card;
-    lpStart = { x: e.clientX, y: e.clientY };
-    card.classList.add('album-card--pressing');
-    lpTimer = setTimeout(() => {
-      lpFired = true;
-      card.classList.remove('album-card--pressing');
-      navigator.vibrate?.(12);
-      openContextMenu(card.dataset.id);
-    }, 450);
-  });
-
-  $preReleaseGrid.addEventListener('pointermove', e => {
-    if (!lpStart) return;
-    if (Math.abs(e.clientX - lpStart.x) > 8 || Math.abs(e.clientY - lpStart.y) > 8) cancelLp();
-  });
-
-  $preReleaseGrid.addEventListener('pointerup',     cancelLp);
-  $preReleaseGrid.addEventListener('pointercancel', cancelLp);
-  $preReleaseGrid.addEventListener('contextmenu',   e => e.preventDefault());
+  bindLongPress($preReleaseGrid, '.album-card');
 
   $preReleaseGrid.addEventListener('click', e => {
     if (lpFired) { lpFired = false; return; }
@@ -913,54 +913,10 @@ function bindEvents() {
   });
 
   // ── Long press on archive mosaic (no tap action — menu only) ─────────────
-  $archiveGrid.addEventListener('pointerdown', e => {
-    const cell = e.target.closest('.archive-cell');
-    if (!cell) return;
-    lpFired = false;
-    lpCard  = cell;
-    lpStart = { x: e.clientX, y: e.clientY };
-    cell.classList.add('album-card--pressing');
-    lpTimer = setTimeout(() => {
-      lpFired = true;
-      cell.classList.remove('album-card--pressing');
-      navigator.vibrate?.(12);
-      openContextMenu(cell.dataset.id);
-    }, 450);
-  });
-
-  $archiveGrid.addEventListener('pointermove', e => {
-    if (!lpStart) return;
-    if (Math.abs(e.clientX - lpStart.x) > 8 || Math.abs(e.clientY - lpStart.y) > 8) cancelLp();
-  });
-
-  $archiveGrid.addEventListener('pointerup',     cancelLp);
-  $archiveGrid.addEventListener('pointercancel', cancelLp);
-  $archiveGrid.addEventListener('contextmenu',   e => e.preventDefault());
+  bindLongPress($archiveGrid, '.archive-cell');
 
   // ── Long press on vinyl rows (mirrors shelf) ─────────────────────────────
-  $vinylList.addEventListener('pointerdown', e => {
-    const row = e.target.closest('.vinyl-row');
-    if (!row) return;
-    lpFired = false;
-    lpCard  = row;
-    lpStart = { x: e.clientX, y: e.clientY };
-    row.classList.add('album-card--pressing');
-    lpTimer = setTimeout(() => {
-      lpFired = true;
-      row.classList.remove('album-card--pressing');
-      navigator.vibrate?.(12);
-      openContextMenu(row.dataset.id);
-    }, 450);
-  });
-
-  $vinylList.addEventListener('pointermove', e => {
-    if (!lpStart) return;
-    if (Math.abs(e.clientX - lpStart.x) > 8 || Math.abs(e.clientY - lpStart.y) > 8) cancelLp();
-  });
-
-  $vinylList.addEventListener('pointerup',     cancelLp);
-  $vinylList.addEventListener('pointercancel', cancelLp);
-  $vinylList.addEventListener('contextmenu',   e => e.preventDefault());
+  bindLongPress($vinylList, '.vinyl-row');
 
   $vinylList.addEventListener('click', e => {
     if (lpFired) { lpFired = false; return; }
