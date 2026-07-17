@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v57'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v58'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -168,24 +168,6 @@ function applySettingsUI() {
   $settingShopUrl.value      = settings.shopUrl;
   const $version = document.getElementById('appVersion');
   if ($version) $version.textContent = 'LPQ ' + APP_VERSION;
-  updateSpotifyUI();
-}
-
-// Reflect the current Spotify connection state in Settings.
-function updateSpotifyUI() {
-  if (!$spotifyStatus) return;
-  if (spotifyConnected()) {
-    const who = spProfile ? ` as ${spProfile.name}` : '';
-    $spotifyStatus.textContent = spProfile && !spProfile.premium
-      ? `Connected${who}, but tap-to-play needs Spotify Premium. Free accounts still open the album in Spotify.`
-      : `Connected${who}. Tap any album to start playing it on Spotify.`;
-    $spotifyConnect.hidden = true;
-    $spotifyDisconnect.hidden = false;
-  } else {
-    $spotifyStatus.textContent = 'Connect your Spotify account to play albums instantly when you tap them (Premium required).';
-    $spotifyConnect.hidden = false;
-    $spotifyDisconnect.hidden = true;
-  }
 }
 
 // ─── Spotify ──────────────────────────────────────────────────────────────────
@@ -209,258 +191,6 @@ async function getSpotifyToken() {
   spToken  = data.access_token;
   spExpiry = Date.now() + (data.expires_in - 60) * 1000;
   return spToken;
-}
-
-// ─── Spotify user auth (PKCE) + playback ───────────────────────────────────────
-// Anonymous client-credentials (above) can read the catalog but can't control
-// playback. Tap-to-play needs a user token, obtained via the Authorization Code
-// + PKCE flow (no client secret in the redirect — safe for a static SPA).
-// The redirect URI MUST be registered verbatim in the Spotify app dashboard.
-const REDIRECT_URI = 'https://karlconwaymusic-creator.github.io/shelflife/';
-const SP_SCOPES    = 'user-modify-playback-state user-read-playback-state user-read-private';
-let spUserToken  = null;
-let spUserExpiry = 0;
-let spProfile    = null; // { name, premium } once fetched
-
-const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf)))
-  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-
-async function sha256(str) {
-  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-}
-
-function randomString(len = 64) {
-  const bytes = crypto.getRandomValues(new Uint8Array(len));
-  return b64url(bytes).slice(0, len);
-}
-
-function spotifyConnected() { return !!localStorage.getItem('lpq-sp-refresh'); }
-
-// Kick off the OAuth redirect. Stores the PKCE verifier + CSRF state first.
-async function beginSpotifyAuth() {
-  const verifier  = randomString(64);
-  const state     = randomString(16);
-  const challenge = b64url(await sha256(verifier));
-  localStorage.setItem('lpq-sp-verifier', verifier);
-  localStorage.setItem('lpq-sp-state', state);
-  const params = new URLSearchParams({
-    client_id: SP_ID,
-    response_type: 'code',
-    redirect_uri: REDIRECT_URI,
-    code_challenge_method: 'S256',
-    code_challenge: challenge,
-    state,
-    scope: SP_SCOPES,
-  });
-  window.location.href = 'https://accounts.spotify.com/authorize?' + params;
-}
-
-// On load, if we came back from Spotify with ?code=, exchange it for tokens.
-// Returns true if a redirect was handled (so the caller can refresh the UI).
-async function handleSpotifyRedirect() {
-  const url = new URL(window.location.href);
-  const code  = url.searchParams.get('code');
-  const state = url.searchParams.get('state');
-  if (!code) return false;
-  const cleanUrl = () => window.history.replaceState(null, '', REDIRECT_URI);
-
-  const savedState = localStorage.getItem('lpq-sp-state');
-  const verifier   = localStorage.getItem('lpq-sp-verifier');
-  localStorage.removeItem('lpq-sp-state');
-  localStorage.removeItem('lpq-sp-verifier');
-  if (!verifier || state !== savedState) { cleanUrl(); return false; } // CSRF / stale
-
-  try {
-    const res = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: REDIRECT_URI,
-        client_id: SP_ID,
-        code_verifier: verifier,
-      }),
-    });
-    if (!res.ok) { cleanUrl(); return false; }
-    const d = await res.json();
-    spUserToken  = d.access_token;
-    spUserExpiry = Date.now() + (d.expires_in - 60) * 1000;
-    if (d.refresh_token) localStorage.setItem('lpq-sp-refresh', d.refresh_token);
-  } catch { /* fall through */ }
-  cleanUrl();
-  return true;
-}
-
-// Return a valid user access token, refreshing via the stored refresh token
-// when needed. null if not connected or the refresh failed.
-async function getUserToken() {
-  if (spUserToken && Date.now() < spUserExpiry) return spUserToken;
-  const refresh = localStorage.getItem('lpq-sp-refresh');
-  if (!refresh) return null;
-  try {
-    const res = await fetch('https://accounts.spotify.com/api/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: refresh,
-        client_id: SP_ID,
-      }),
-    });
-    if (!res.ok) {
-      if (res.status === 400) disconnectSpotify(); // refresh token revoked/expired
-      return null;
-    }
-    const d = await res.json();
-    spUserToken  = d.access_token;
-    spUserExpiry = Date.now() + (d.expires_in - 60) * 1000;
-    if (d.refresh_token) localStorage.setItem('lpq-sp-refresh', d.refresh_token);
-    return spUserToken;
-  } catch { return null; }
-}
-
-function disconnectSpotify() {
-  localStorage.removeItem('lpq-sp-refresh');
-  spUserToken = null;
-  spUserExpiry = 0;
-  spProfile = null;
-}
-
-// Fetch display name + premium status for the Settings UI. Cached in spProfile.
-async function fetchSpotifyProfile() {
-  const token = await getUserToken();
-  if (!token) return null;
-  try {
-    const res = await fetch('https://api.spotify.com/v1/me', {
-      headers: { 'Authorization': 'Bearer ' + token },
-    });
-    if (!res.ok) return null;
-    const d = await res.json();
-    spProfile = { name: d.display_name || d.id, premium: d.product === 'premium' };
-    return spProfile;
-  } catch { return null; }
-}
-
-// Start playing an album on the user's Spotify device. Returns { ok, reason, device }.
-// Tries the account's current target first; if that's unavailable (no active
-// device) or refuses remote control (RESTRICTION_VIOLATED — some Connect
-// integrations, e.g. certain smart speakers, only accept commands from the
-// official Spotify app), walks every other *non-restricted* device Spotify
-// knows about, waking each with a transfer call before retrying if it looks
-// idle (404). This is what lets a tap succeed on whichever of your devices
-// — earbuds via phone, Sonos, phone speaker — actually accepts the command,
-// without you having to know in advance which one that is.
-// reason is 'ok', 'no-token', 'no-device', 'no-usable-device', or — for any
-// other failure — the literal reason/message Spotify's error body reports.
-async function startPlayback(contextUri) {
-  const play = async (deviceId) => {
-    const token = await getUserToken();
-    if (!token) return null;
-    const qs = deviceId ? '?device_id=' + deviceId : '';
-    return fetch('https://api.spotify.com/v1/me/player/play' + qs, {
-      method: 'PUT',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ context_uri: contextUri }),
-    });
-  };
-  const transferTo = async (deviceId) => {
-    const token = await getUserToken();
-    if (!token) return;
-    await fetch('https://api.spotify.com/v1/me/player', {
-      method: 'PUT',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device_ids: [deviceId], play: false }),
-    });
-  };
-  // Spotify error bodies look like {"error":{"status":403,"message":"...","reason":"PREMIUM_REQUIRED"}}
-  const parseError = async (res) => {
-    try {
-      const d = await res.clone().json();
-      return d?.error?.reason || d?.error?.message || null;
-    } catch { return null; }
-  };
-  const listDevices = async () => {
-    const token = await getUserToken();
-    const dRes = await fetch('https://api.spotify.com/v1/me/player/devices', {
-      headers: { 'Authorization': 'Bearer ' + token },
-    });
-    return dRes.ok ? (await dRes.json()).devices : [];
-  };
-  // One attempt against a specific device (or the account default if deviceId
-  // is undefined); handles the 401→refresh→retry dance internally.
-  const attempt = async (deviceId, label) => {
-    let res = await play(deviceId);
-    if (!res) return { ok: false, reason: 'no-token' };
-    if (res.status === 401) { spUserExpiry = 0; res = await play(deviceId); }
-    if (res.ok) return { ok: true, reason: 'ok', device: label };
-    return { ok: false, status: res.status, reason: await parseError(res), device: label };
-  };
-
-  try {
-    let result = await attempt(undefined, null); // let Spotify pick — usually correct
-    if (result.ok) return result;
-
-    const needsRetarget = result.status === 404 || result.reason === 'RESTRICTION_VIOLATED';
-    if (!needsRetarget) {
-      console.warn('[LPQ] playback failed:', result.status, result.reason);
-      return result;
-    }
-
-    const devices = await listDevices();
-    console.log('[LPQ] retargeting; known devices:',
-      devices.map(d => `${d.name} (${d.type}${d.is_active ? ', active' : ''}${d.is_restricted ? ', RESTRICTED' : ''})`));
-    const usable = devices.filter(d => !d.is_restricted);
-    if (!usable.length) return { ok: false, reason: devices.length ? 'no-usable-device' : 'no-device' };
-
-    // Try the active one first (most likely to be the earbuds/speaker in use),
-    // then every other usable device in order, until one actually accepts it.
-    const ordered = [...usable.filter(d => d.is_active), ...usable.filter(d => !d.is_active)];
-    for (const d of ordered) {
-      let r = await attempt(d.id, d.name);
-      if (r.ok) return r;
-      if (r.status === 404) {
-        // Device known but not "woken" yet — transfer playback to it first, then retry once
-        await transferTo(d.id);
-        await new Promise(res => setTimeout(res, 400));
-        r = await attempt(d.id, d.name);
-        if (r.ok) return r;
-      }
-      result = r;
-    }
-    console.warn('[LPQ] all devices failed; last:', result.status, result.reason, 'on', result.device);
-    return result;
-  } catch (e) {
-    console.warn('[LPQ] playback exception:', e);
-    return { ok: false, reason: 'exception' };
-  }
-}
-
-// Unified tap action: play through the API if connected & playable, else open Spotify.
-async function playOrOpen(a) {
-  if (!a?.spotifyUrl) return;
-  const id = extractAlbumId(a.spotifyUrl);
-  const playable = id && !a.spotifyUrl.includes('/prerelease/');
-  if (playable && spotifyConnected() && spProfile?.premium !== false) {
-    showToast('Starting playback…');
-    const r = await startPlayback('spotify:album:' + id);
-    if (r.ok) { showToast(r.device ? `Playing on ${r.device}` : 'Playing on Spotify'); return; }
-    // Full technical reason is already logged to console by startPlayback —
-    // keep these short so the toast is readable before it fades.
-    if (r.reason === 'PREMIUM_REQUIRED') {
-      showToast('Playback needs Spotify Premium', 4500);
-    } else if (r.reason === 'no-device') {
-      showToast('No active device — opening Spotify, then tap again', 4500);
-    } else if (r.reason === 'no-usable-device') {
-      showToast('No controllable device found — opening Spotify', 4500);
-    } else {
-      // Show the real reason (not a generic message) — this is the only
-      // diagnostic channel available without connecting dev tools to the phone.
-      const detail = r.device ? `${r.reason} on ${r.device}` : (r.reason || 'unknown error');
-      showToast(`Couldn't play — ${detail}. Opening Spotify.`, 5000);
-    }
-  }
-  window.location.href = toSpotifyUri(a.spotifyUrl);
 }
 
 function extractAlbumId(url) {
@@ -681,9 +411,6 @@ const $settingArchive   = document.getElementById('settingArchive');
 const $settingShelfSize = document.getElementById('settingShelfSize');
 const $shelfSizeVal     = document.getElementById('shelfSizeVal');
 const $settingShopUrl   = document.getElementById('settingShopUrl');
-const $spotifyStatus    = document.getElementById('spotifyStatus');
-const $spotifyConnect   = document.getElementById('spotifyConnectBtn');
-const $spotifyDisconnect = document.getElementById('spotifyDisconnectBtn');
 const $preReleaseGrid  = document.getElementById('preReleaseGrid');
 const $preReleaseEmpty = document.getElementById('preReleaseEmpty');
 const $contextMenu   = document.getElementById('contextMenu');
@@ -742,14 +469,6 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
   backfillLabels();
   backfillPreReleaseMeta().then(() => { checkPreReleases(); render(); }); // fresh date may trigger promotion
 
-  // Complete a Spotify OAuth round-trip if we're returning from one, then
-  // (whether just-connected or already-connected) fetch the profile to show
-  // the display name + premium status in Settings.
-  handleSpotifyRedirect().then(async (returned) => {
-    if (returned) { switchView('settings'); showToast('Spotify connected'); }
-    if (spotifyConnected()) { await fetchSpotifyProfile(); updateSpotifyUI(); }
-  });
-
   // Restore the last active tab so a refresh doesn't bounce the user to shelf
   const savedView = sessionStorage.getItem('lpq-view');
   const validViews = ['shelf', 'prerelease', 'vinyl', 'archive', 'settings'];
@@ -761,7 +480,7 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 let toastTimer = null;
-function showToast(msg, duration = 3000) {
+function showToast(msg) {
   let $t = document.getElementById('toast');
   if (!$t) {
     $t = document.createElement('div');
@@ -772,7 +491,7 @@ function showToast(msg, duration = 3000) {
   $t.textContent = msg;
   clearTimeout(toastTimer);
   $t.classList.remove('toast--hidden');
-  toastTimer = setTimeout(() => $t.classList.add('toast--hidden'), duration);
+  toastTimer = setTimeout(() => $t.classList.add('toast--hidden'), 3000);
 }
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
@@ -1179,7 +898,7 @@ function bindEvents() {
     const card = e.target.closest('.album-card');
     if (!card || card.classList.contains('album-card--ghost')) return; // no Spotify tap on ghosts
     const a = albums.find(a => a.id === card.dataset.id);
-    playOrOpen(a);
+    if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
   });
 
   // ── Long press on pre-release grid (mirrors shelf) ───────────────────────
@@ -1190,7 +909,7 @@ function bindEvents() {
     const card = e.target.closest('.album-card');
     if (!card) return;
     const a = albums.find(a => a.id === card.dataset.id);
-    playOrOpen(a); // pre-releases aren't playable — playOrOpen just opens the link
+    if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
   });
 
   // ── Long press on archive mosaic (no tap action — menu only) ─────────────
@@ -1204,7 +923,7 @@ function bindEvents() {
     const row = e.target.closest('.vinyl-row');
     if (!row) return;
     const a = albums.find(a => a.id === row.dataset.id);
-    playOrOpen(a);
+    if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
   });
 
   // ── Context menu actions ──────────────────────────────────────────────────
@@ -1347,13 +1066,6 @@ function bindEvents() {
       settings.shopUrl = $settingShopUrl.value.trim() || SETTINGS_DEFAULTS.shopUrl;
       saveSettings();
     }, 600);
-  });
-
-  $spotifyConnect.addEventListener('click', () => beginSpotifyAuth());
-  $spotifyDisconnect.addEventListener('click', () => {
-    disconnectSpotify();
-    updateSpotifyUI();
-    showToast('Spotify disconnected');
   });
 
   // ── Spotify URL input ─────────────────────────────────────────────────────
