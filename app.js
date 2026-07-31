@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v60'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v61'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
