@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v58'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v59'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -474,9 +474,91 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
   const validViews = ['shelf', 'prerelease', 'vinyl', 'archive', 'settings'];
   if (savedView && validViews.includes(savedView)) switchView(savedView);
 
+  // Handle an album shared in from Spotify via the Android share sheet
+  handleShareTarget();
+
   // SW registration and update logic lives in the inline script in index.html
   // so it always runs from the network-fresh HTML regardless of cached app.js.
 })();
+
+// ─── Share target ─────────────────────────────────────────────────────────────
+// Android share sheet → LPQ. manifest.json declares a GET share_target, so
+// Spotify's "Share" lands here with the album URL in ?url= / ?text= / ?title=.
+// Spotify usually puts the link inside `text` alongside a blurb, so scan all
+// three params for the first Spotify album/prerelease URL.
+function extractSharedSpotifyUrl(params) {
+  const re = /https?:\/\/open\.spotify\.com\/(?:intl-[a-z]+\/)?(?:album|prerelease)\/[A-Za-z0-9]+[^\s]*/i;
+  for (const key of ['url', 'text', 'title']) {
+    const m = (params.get(key) || '').match(re);
+    if (m) return m[0];
+  }
+  return null;
+}
+
+async function handleShareTarget() {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has('url') && !params.has('text') && !params.has('title')) return;
+  const sharedUrl = extractSharedSpotifyUrl(params);
+  // Strip the share params either way so a refresh can't re-add the album
+  window.history.replaceState(null, '', window.location.pathname);
+  if (!sharedUrl) { showToast('No Spotify album link found in that share'); return; }
+
+  const albumId = extractAlbumId(sharedUrl);
+  if (!albumId) { showToast('Couldn\'t read that Spotify link'); return; }
+
+  // Already in the collection? Just take the user to it rather than duplicating.
+  const existing = albums.find(a => a.spotifyUrl && extractAlbumId(a.spotifyUrl) === albumId);
+  if (existing) {
+    const where = existing.archived ? 'archive' : existing.preRelease ? 'prerelease'
+                : existing.detached ? 'vinyl' : 'shelf';
+    switchView(where);
+    showToast(`${existing.title} is already in your ${where === 'prerelease' ? 'pre-releases' : where}`);
+    return;
+  }
+
+  showToast('Looking up album…');
+  let data;
+  try {
+    data = await fetchSpotifyAlbum(albumId, sharedUrl);
+  } catch {
+    showToast('Couldn\'t find that album on Spotify');
+    return;
+  }
+
+  const isPre = isPreRelease(data.releaseDate, data.spotifyUrl);
+  // Shelf-full only blocks shelf adds — pre-releases don't occupy shelf slots.
+  if (!isPre) {
+    const onShelf = albums.filter(a => !a.archived && !a.preRelease && !a.detached).length;
+    if (onShelf >= settings.shelfSize) {
+      switchView('shelf');
+      showToast(settings.shelfSize < 20
+        ? 'Shelf full — raise the limit in Settings or remove an album'
+        : 'Shelf full — remove an album to make room');
+      return;
+    }
+  }
+
+  const releaseDate = data.releaseDate ?? null;
+  albums.unshift({
+    id:          uid(),
+    title:       data.title,
+    artist:      data.artist || '',
+    art:         data.art,
+    spotifyUrl:  data.spotifyUrl,
+    year:        data.year ?? (releaseDate ? releaseDate.slice(0, 4) : null),
+    releaseDate: releaseDate,
+    label:       data.label ?? null,
+    addedAt:     Date.now(),
+    vinyl:       false,
+    detached:    false,
+    archived:    false,
+    preRelease:  isPre,
+  });
+  save();
+  render();
+  switchView(isPre ? 'prerelease' : 'shelf');
+  showToast(isPre ? `Added ${data.title} to Pre-Releases` : `Added ${data.title} to your shelf`);
+}
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 let toastTimer = null;

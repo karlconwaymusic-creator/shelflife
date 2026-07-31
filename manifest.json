@@ -9,6 +9,15 @@
   "theme_color": "#0d0d0d",
   "orientation": "portrait-primary",
   "categories": ["music", "lifestyle"],
+  "share_target": {
+    "action": "./index.html",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
   "icons": [
     {
       "src": "icon.svg",
