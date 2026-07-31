@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v59'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v60'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -495,20 +495,43 @@ function extractSharedSpotifyUrl(params) {
   return null;
 }
 
-async function handleShareTarget() {
+// Capture the shared link and hand off to processPendingShare(). The link is
+// persisted to sessionStorage *before* any async work: a service-worker update
+// can reload the page mid-lookup, and by then the query params are long gone,
+// which would silently lose the share.
+function handleShareTarget() {
   const params = new URLSearchParams(window.location.search);
-  if (!params.has('url') && !params.has('text') && !params.has('title')) return;
-  const sharedUrl = extractSharedSpotifyUrl(params);
-  // Strip the share params either way so a refresh can't re-add the album
-  window.history.replaceState(null, '', window.location.pathname);
-  if (!sharedUrl) { showToast('No Spotify album link found in that share'); return; }
+  if (params.has('url') || params.has('text') || params.has('title')) {
+    const sharedUrl = extractSharedSpotifyUrl(params);
+    window.history.replaceState(null, '', window.location.pathname); // no re-add on refresh
+    if (!sharedUrl) { showToast('No Spotify album link found in that share'); return; }
+    sessionStorage.setItem('lpq-share', JSON.stringify({ url: sharedUrl, at: Date.now() }));
+  }
+  // Run once the page has settled — a lookup fired mid-load can stall on the
+  // network, and waiting also lets any pending SW reload happen first.
+  if (document.readyState === 'complete') processPendingShare();
+  else window.addEventListener('load', processPendingShare, { once: true });
+}
+
+async function processPendingShare() {
+  let pending = null;
+  try { pending = JSON.parse(sessionStorage.getItem('lpq-share') || 'null'); } catch {}
+  if (!pending?.url) return;
+  // Don't resurrect an old share on some unrelated later load
+  if (Date.now() - (pending.at || 0) > 2 * 60 * 1000) {
+    sessionStorage.removeItem('lpq-share');
+    return;
+  }
+  const sharedUrl = pending.url;
+  const done = () => sessionStorage.removeItem('lpq-share'); // only on a terminal outcome
 
   const albumId = extractAlbumId(sharedUrl);
-  if (!albumId) { showToast('Couldn\'t read that Spotify link'); return; }
+  if (!albumId) { done(); showToast('Couldn\'t read that Spotify link'); return; }
 
   // Already in the collection? Just take the user to it rather than duplicating.
   const existing = albums.find(a => a.spotifyUrl && extractAlbumId(a.spotifyUrl) === albumId);
   if (existing) {
+    done();
     const where = existing.archived ? 'archive' : existing.preRelease ? 'prerelease'
                 : existing.detached ? 'vinyl' : 'shelf';
     switchView(where);
@@ -519,11 +542,21 @@ async function handleShareTarget() {
   showToast('Looking up album…');
   let data;
   try {
-    data = await fetchSpotifyAlbum(albumId, sharedUrl);
-  } catch {
-    showToast('Couldn\'t find that album on Spotify');
+    // Bound the lookup — without this a stalled request leaves the user staring
+    // at "Looking up album…" forever with no album and no error.
+    data = await Promise.race([
+      fetchSpotifyAlbum(albumId, sharedUrl),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000)),
+    ]);
+  } catch (err) {
+    done();
+    console.warn('[LPQ] shared album lookup failed:', err);
+    showToast(err?.message === 'timeout'
+      ? 'Album lookup timed out — try adding it with +'
+      : 'Couldn\'t find that album on Spotify');
     return;
   }
+  done();
 
   const isPre = isPreRelease(data.releaseDate, data.spotifyUrl);
   // Shelf-full only blocks shelf adds — pre-releases don't occupy shelf slots.
