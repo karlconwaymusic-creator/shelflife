@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v63'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v64'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -148,16 +148,25 @@ async function backfillLabels() {
 }
 
 // ─── Wikipedia ─────────────────────────────────────────────────────────────────
-// Search "TITLE ARTIST album", restricted to pages using the Infobox album
-// template. Plain-text search on just title+artist frequently top-ranks an
-// unrelated biography (e.g. "Womack Sisters" surfacing actress Samantha
-// Womack) because MediaWiki scores loose word overlap, not "is this an album
-// article." hastemplate:"Infobox album" filters to pages actually structured
-// as album articles, which both fixes wrong matches and correctly returns
-// nothing when no real article exists, rather than confidently linking the
-// wrong page. Verified against 9 known-good albums with no regressions.
+// Two relevance constraints, both required:
+//  - intitle:"TITLE"              the article's own title must contain the
+//                                  album title — plain-text search on
+//                                  title+artist alone ranks by loose word
+//                                  overlap and can top-rank an unrelated page
+//                                  (e.g. "Womack Sisters" surfacing actress
+//                                  Samantha Womack purely because her bio
+//                                  mentions "Womack")
+//  - hastemplate:"Infobox album"  the page must be structured as an album
+//                                  article, not a biography/song/other topic
+// Artist is kept as an unquoted term (not required in the title) purely to
+// disambiguate common one-word titles like "Blonde" — dropping it entirely
+// caused Frank Ocean's Blonde to lose to "Legally Blonde 2".
+// No match under both constraints correctly returns null (e.g. a genuinely
+// non-existent article) rather than confidently linking a wrong page.
+// Verified against 10 known albums plus 2 real user-reported failures
+// (Pelican West, The Womack Sisters) with no regressions.
 async function findWikipediaUrl(a) {
-  const query = `${a.title} ${a.artist} album hastemplate:"Infobox album"`;
+  const query = `intitle:"${a.title}" ${a.artist} hastemplate:"Infobox album"`;
   const url = 'https://en.wikipedia.org/w/api.php?action=query&list=search' +
     `&srsearch=${encodeURIComponent(query)}&format=json&origin=*`;
   const res = await fetch(url);
