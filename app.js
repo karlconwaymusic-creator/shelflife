@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v61'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v62'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -841,6 +841,7 @@ function deleteFromArchive(id) {
   if (a.vinyl) {
     a.archived = false;
     a.detached = true; // vinyl-only: hidden from shelf/archive, visible in vinyl
+    a.spotifyUrl = null; // no streaming link persists once it's vinyl-only
     delete a.ghostUntil;
   } else {
     albums = albums.filter(x => x.id !== id);
@@ -1033,13 +1034,8 @@ function bindEvents() {
   // ── Long press on vinyl rows (mirrors shelf) ─────────────────────────────
   bindLongPress($vinylList, '.vinyl-row');
 
-  $vinylList.addEventListener('click', e => {
-    if (lpFired) { lpFired = false; return; }
-    const row = e.target.closest('.vinyl-row');
-    if (!row) return;
-    const a = albums.find(a => a.id === row.dataset.id);
-    if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
-  });
+  // No tap-to-Spotify in the vinyl wishlist — it's a shopping list, not a
+  // streaming shortcut. (Long-press still offers Buy / Remove / Wikipedia.)
 
   // ── Context menu actions ──────────────────────────────────────────────────
   $ctxMoveToShelf.addEventListener('click', () => {
@@ -1332,7 +1328,9 @@ function onSubmit(e) {
     title:       fetchedAlbum.title,
     artist:      artist,
     art:         fetchedAlbum.art,
-    spotifyUrl:  fetchedAlbum.spotifyUrl,
+    // Vinyl-only adds are a shopping list, not a streaming shortcut — the
+    // Spotify URL was only needed to look up title/art/year just now.
+    spotifyUrl:  isVinyl ? null : fetchedAlbum.spotifyUrl,
     year:        fetchedAlbum.year ?? (releaseDate ? releaseDate.slice(0, 4) : null),
     releaseDate: releaseDate,
     label:       fetchedAlbum.label ?? null,
