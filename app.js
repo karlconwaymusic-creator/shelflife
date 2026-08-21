@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v64'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v65'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -147,11 +147,23 @@ async function backfillLabels() {
   if (changed) render();
 }
 
+// Spotify's catalog frequently lists reissues under a modified title —
+// "Pelican West Plus", "Pelican West - 40th Anniversary" — while Wikipedia
+// covers the original release under the plain title. Strip common edition/
+// reissue markers so the intitle: match below has a chance of hitting.
+function cleanAlbumTitleForWiki(title) {
+  let t = title;
+  t = t.replace(/\s*[([][^)\]]*\b(remaster(ed)?|deluxe|expanded|anniversary|edition|bonus\s*track|live|reissue|special|version)\b[^)\]]*[)\]]\s*$/i, '');
+  t = t.replace(/\s*[-–—]\s*(\d+(st|nd|rd|th)?\s+anniversary.*|remaster(ed)?.*|deluxe.*|reissue.*|special.*|expanded.*|live.*)$/i, '');
+  t = t.replace(/\s+(plus|remastered|reissue)$/i, '');
+  return t.trim() || title; // never end up with an empty string
+}
+
 // ─── Wikipedia ─────────────────────────────────────────────────────────────────
 // Two relevance constraints, both required:
 //  - intitle:"TITLE"              the article's own title must contain the
-//                                  album title — plain-text search on
-//                                  title+artist alone ranks by loose word
+//                                  (cleaned) album title — plain-text search
+//                                  on title+artist alone ranks by loose word
 //                                  overlap and can top-rank an unrelated page
 //                                  (e.g. "Womack Sisters" surfacing actress
 //                                  Samantha Womack purely because her bio
@@ -163,10 +175,13 @@ async function backfillLabels() {
 // caused Frank Ocean's Blonde to lose to "Legally Blonde 2".
 // No match under both constraints correctly returns null (e.g. a genuinely
 // non-existent article) rather than confidently linking a wrong page.
-// Verified against 10 known albums plus 2 real user-reported failures
-// (Pelican West, The Womack Sisters) with no regressions.
+// Verified against 10 known albums, 2 real user-reported mismatches
+// (Pelican West, The Womack Sisters), and a real reissue-title miss
+// ("Pelican West Plus" / "Pelican West - 40th Anniversary" not matching
+// Wikipedia's plain "Pelican West") — all fixed with no regressions.
 async function findWikipediaUrl(a) {
-  const query = `intitle:"${a.title}" ${a.artist} hastemplate:"Infobox album"`;
+  const title = cleanAlbumTitleForWiki(a.title);
+  const query = `intitle:"${title}" ${a.artist} hastemplate:"Infobox album"`;
   const url = 'https://en.wikipedia.org/w/api.php?action=query&list=search' +
     `&srsearch=${encodeURIComponent(query)}&format=json&origin=*`;
   const res = await fetch(url);
