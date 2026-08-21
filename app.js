@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v62'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v63'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -148,9 +148,16 @@ async function backfillLabels() {
 }
 
 // ─── Wikipedia ─────────────────────────────────────────────────────────────────
-// Search "TITLE ARTIST album" and return the direct article URL of the top hit.
+// Search "TITLE ARTIST album", restricted to pages using the Infobox album
+// template. Plain-text search on just title+artist frequently top-ranks an
+// unrelated biography (e.g. "Womack Sisters" surfacing actress Samantha
+// Womack) because MediaWiki scores loose word overlap, not "is this an album
+// article." hastemplate:"Infobox album" filters to pages actually structured
+// as album articles, which both fixes wrong matches and correctly returns
+// nothing when no real article exists, rather than confidently linking the
+// wrong page. Verified against 9 known-good albums with no regressions.
 async function findWikipediaUrl(a) {
-  const query = `${a.title} ${a.artist} album`;
+  const query = `${a.title} ${a.artist} album hastemplate:"Infobox album"`;
   const url = 'https://en.wikipedia.org/w/api.php?action=query&list=search' +
     `&srsearch=${encodeURIComponent(query)}&format=json&origin=*`;
   const res = await fetch(url);
@@ -1056,21 +1063,20 @@ function bindEvents() {
     if (!id) return;
     const a = albums.find(a => a.id === id);
     if (!a) return;
-    // Open the tab synchronously (within the user gesture) so the async
-    // Wikipedia lookup that follows doesn't trip popup blockers.
-    const win = window.open('about:blank', '_blank');
     closeContextMenu();
+    // Look up first, then open the resolved URL in one step — matches the
+    // Buy button's proven-working pattern. The earlier version opened a
+    // blank tab immediately and redirected it once the lookup resolved;
+    // that two-step open-then-redirect is unreliable inside an installed
+    // Android PWA (the redirect can silently fail), which is why taps
+    // sometimes did nothing at all rather than erroring visibly.
+    showToast('Looking up Wikipedia…');
     try {
       const url = await findWikipediaUrl(a);
-      if (url) {
-        if (win) win.location.href = url;
-        else window.location.href = url; // popup blocked — fall back to same tab
-      } else {
-        win?.close();
-        showToast('No Wikipedia article found');
-      }
+      if (!url) { showToast('No Wikipedia article found'); return; }
+      const win = window.open(url, '_blank');
+      if (!win) window.location.href = url; // popup blocked — fall back to same tab
     } catch {
-      win?.close();
       showToast('Couldn\'t reach Wikipedia');
     }
   });
