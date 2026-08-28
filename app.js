@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v67'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v68'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -46,6 +46,7 @@ const SHELF_FULL_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
 function checkPreReleases() {
   let changed = false;
+  const promotedIds = []; // land these at the top of the Shelf feed, below
   for (const a of albums) {
     if (!a.preRelease) continue;
     // Never auto-promote if we don't have a date to check against
@@ -62,6 +63,7 @@ function checkPreReleases() {
       a.preRelease = false;
       delete a.shelfFullSince;
       changed = true;
+      promotedIds.push(a.id);
     } else if (!a.shelfFullSince) {
       // First time we've seen it released with no room — start the 7-day
       // clock. Stays in Pre-Releases with the "Shelf Full" badge.
@@ -76,7 +78,18 @@ function checkPreReleases() {
     }
     // else: still within the grace window and shelf still full — leave as-is.
   }
+  // Reorder after the loop, never during it — mutating `albums` mid-for...of
+  // can skip or revisit elements as indices shift underneath the iterator.
+  for (const id of promotedIds) moveAlbumToFront(id);
   if (changed) save();
+}
+
+// Move an album to index 0 so it renders first — used when a pre-release
+// promotes to the Shelf, so it lands at the top of the feed rather than
+// wherever it happened to sit from whenever it was originally added.
+function moveAlbumToFront(id) {
+  const idx = albums.findIndex(a => a.id === id);
+  if (idx > 0) albums.unshift(albums.splice(idx, 1)[0]);
 }
 
 // Silently fetch release years / dates for albums that pre-date those features.
@@ -787,6 +800,16 @@ function renderArchive() {
 
 function renderPreRelease() {
   const upcoming = albums.filter(a => a.preRelease && !a.archived);
+  // Nearest release date first. Albums already released and waiting on shelf
+  // room sort naturally to the top too — their date is in the past, i.e. the
+  // "nearest" of all. Unknown dates ("Coming soon") sort to the very end,
+  // since there's no proximity to rank them by.
+  upcoming.sort((a, b) => {
+    if (!a.releaseDate && !b.releaseDate) return 0;
+    if (!a.releaseDate) return 1;
+    if (!b.releaseDate) return -1;
+    return a.releaseDate < b.releaseDate ? -1 : a.releaseDate > b.releaseDate ? 1 : 0;
+  });
   $preReleaseGrid.innerHTML = '';
   $preReleaseEmpty.style.display = upcoming.length ? 'none' : 'flex';
 
@@ -1089,6 +1112,7 @@ function bindEvents() {
     // No shelf-size check — this reclassifies an existing album, not a new add
     a.preRelease = false;
     delete a.shelfFullSince;
+    moveAlbumToFront(id); // lands at the top of the Shelf feed
     save();
     render();
     showToast('Moved to shelf');
