@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v65'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v66'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -954,9 +954,14 @@ function openContextMenu(id) {
   $ctxMoveToShelf.classList.toggle('visible', currentView === 'prerelease');
   $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
 
-  // Each view exposes its own set of actions in the long-press menu.
-  const inArchive = currentView === 'archive';
-  const inVinyl   = currentView === 'vinyl';
+  // Each view exposes its own set of actions in the long-press menu. A ghost
+  // card (shelf placeholder for a release archived on a full shelf) is really
+  // an archived album wherever you long-press it from, so it always gets the
+  // Archive menu (Restore to Shelf / Delete) — otherwise it'd show the Shelf
+  // buttons while being fully inert, i.e. impossible to remove or restore.
+  const isGhost   = a.ghostUntil && Date.now() < a.ghostUntil;
+  const inArchive = currentView === 'archive' || isGhost;
+  const inVinyl   = currentView === 'vinyl' && !isGhost;
   $ctxBuy.classList.toggle('context-btn--hidden', !inVinyl);                // Buy: vinyl only
   $ctxVinyl.classList.toggle('context-btn--hidden', inArchive);            // in vinyl reads "Remove from Vinyl"
   $ctxArchive.classList.toggle('context-btn--hidden', inArchive || inVinyl);
@@ -1037,8 +1042,10 @@ function bindEvents() {
     btn.addEventListener('click', () => switchView(btn.dataset.view));
   });
 
-  // ── Long press on shelf (ghost cards are inert) ───────────────────────────
-  bindLongPress($shelf, '.album-card', el => el.classList.contains('album-card--ghost'));
+  // ── Long press on shelf (ghost cards ARE long-pressable — see openContextMenu,
+  //    which gives them the Archive menu so they can actually be restored or
+  //    deleted; only the tap-to-Spotify shortcut below stays disabled for them) ──
+  bindLongPress($shelf, '.album-card');
 
   $shelf.addEventListener('click', e => {
     if (lpFired) { lpFired = false; return; }

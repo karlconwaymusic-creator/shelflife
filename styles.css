@@ -213,10 +213,9 @@ main { padding: 0; }
 }
 
 
-/* ─── Ghost card — released on a full shelf, lives in archive ─────────────── */
-.album-card--ghost {
-  cursor: default;
-}
+/* ─── Ghost card — released on a full shelf, lives in archive ───────────────
+   Long-press still opens the (Archive-mode) options menu; only the plain
+   tap-to-open-Spotify shortcut is disabled, so cursor stays "pointer". */
 .album-card--ghost .album-art,
 .album-card--ghost .album-no-art {
   opacity: 0.4;
