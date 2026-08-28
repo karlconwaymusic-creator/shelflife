@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v66'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v67'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -33,30 +33,48 @@ function saveSettings() {
 // Promote pre-release albums whose release date has now passed.
 // Only acts when we have a confirmed release date — albums with no date stay
 // in Pre-Releases until the date is known (backfill) or they're manually moved.
+//
+// A released album with no room on the shelf does NOT archive immediately.
+// It stays in Pre-Releases — fully interactive (Wikipedia, Buy on Vinyl,
+// Move to Shelf, Archive, Remove all still work) except the Spotify tap
+// shortcut, which is disabled — showing a "Shelf Full" badge instead of the
+// release date. a.shelfFullSince marks when this waiting period began. On
+// every check: if shelf room has since opened up, it promotes to the shelf
+// immediately; if 7 days pass with the shelf still full, it archives for
+// good (and stays archived regardless of shelf room after that).
+const SHELF_FULL_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+
 function checkPreReleases() {
   let changed = false;
   for (const a of albums) {
-    // Expire ghost cards (shelf placeholders for releases archived on a full shelf)
-    if (a.ghostUntil && Date.now() >= a.ghostUntil) {
-      delete a.ghostUntil;
-      changed = true;
-    }
     if (!a.preRelease) continue;
     // Never auto-promote if we don't have a date to check against
     if (!a.releaseDate && !a.spotifyUrl?.includes('/prerelease/')) continue;
-    if (!isPreRelease(a.releaseDate, a.spotifyUrl)) {
-      // Check shelf capacity before marking as released (before it counts toward the shelf)
-      const shelfFull = albums.filter(
-        x => !x.archived && !x.preRelease && !x.detached
-      ).length >= settings.shelfSize;
+    if (isPreRelease(a.releaseDate, a.spotifyUrl)) continue; // not released yet
+
+    const shelfFull = albums.filter(
+      x => !x.archived && !x.preRelease && !x.detached
+    ).length >= settings.shelfSize;
+
+    if (!shelfFull) {
+      // Room available — promote straight to the shelf, whether this is the
+      // first time we've noticed it released or it's been waiting a while.
       a.preRelease = false;
-      if (shelfFull) {
-        // No room — archive it, but leave a 7-day ghost card on the shelf
-        a.archived   = true;
-        a.ghostUntil = Date.now() + 7 * 24 * 60 * 60 * 1000;
-      }
+      delete a.shelfFullSince;
+      changed = true;
+    } else if (!a.shelfFullSince) {
+      // First time we've seen it released with no room — start the 7-day
+      // clock. Stays in Pre-Releases with the "Shelf Full" badge.
+      a.shelfFullSince = Date.now();
+      changed = true;
+    } else if (Date.now() - a.shelfFullSince >= SHELF_FULL_GRACE_MS) {
+      // Grace period elapsed and still no room — archive it for good.
+      a.preRelease = false;
+      a.archived   = true;
+      delete a.shelfFullSince;
       changed = true;
     }
+    // else: still within the grace window and shelf still full — leave as-is.
   }
   if (changed) save();
 }
@@ -659,20 +677,15 @@ function render() {
 
 function renderShelf() {
   const active = albums.filter(a => !a.archived && !a.preRelease && !a.detached);
-  // Ghosts: releases that hit their date on a full shelf — archived, but shown
-  // here as inert placeholders for 7 days so the release doesn't slip by unseen.
-  const ghosts = albums.filter(a => a.archived && a.ghostUntil && Date.now() < a.ghostUntil);
   $shelf.innerHTML = '';
-  $empty.style.display = (active.length || ghosts.length) ? 'none' : 'flex';
+  $empty.style.display = active.length ? 'none' : 'flex';
 
-  const buildCard = (a, ghost) => {
+  for (const a of active) {
     const card = document.createElement('div');
-    card.className = 'album-card' + (ghost ? ' album-card--ghost' : '');
+    card.className = 'album-card';
     card.dataset.id = a.id;
     card.setAttribute('role', 'listitem');
-    card.setAttribute('aria-label', ghost
-      ? `${a.title} by ${a.artist} — released but shelf was full, now in archive`
-      : `${a.title} by ${a.artist}${a.spotifyUrl ? ' — opens Spotify' : ''}`);
+    card.setAttribute('aria-label', `${a.title} by ${a.artist}${a.spotifyUrl ? ' — opens Spotify' : ''}`);
 
     if (a.art) {
       const img = document.createElement('img');
@@ -691,18 +704,8 @@ function renderShelf() {
       card.appendChild(noArt);
     }
 
-    if (ghost) {
-      const badge = document.createElement('div');
-      badge.className = 'ghost-badge';
-      badge.textContent = 'Shelf Full';
-      card.appendChild(badge);
-    }
-
     $shelf.appendChild(card);
-  };
-
-  for (const a of active) buildCard(a, false);
-  for (const a of ghosts) buildCard(a, true);
+  }
 }
 
 // Vinyl wishlist: large square artwork on the left, artist/title/year beside.
@@ -788,11 +791,14 @@ function renderPreRelease() {
   $preReleaseEmpty.style.display = upcoming.length ? 'none' : 'flex';
 
   for (const a of upcoming) {
+    const shelfFull = !!a.shelfFullSince;
     const card = document.createElement('div');
     card.className = 'album-card';
     card.dataset.id = a.id;
     card.setAttribute('role', 'listitem');
-    card.setAttribute('aria-label', `${a.title} by ${a.artist}, releasing ${a.releaseDate ?? 'soon'}`);
+    card.setAttribute('aria-label', shelfFull
+      ? `${a.title} by ${a.artist} — released, waiting for shelf space`
+      : `${a.title} by ${a.artist}, releasing ${a.releaseDate ?? 'soon'}`);
 
     if (a.art) {
       const img = document.createElement('img');
@@ -813,7 +819,7 @@ function renderPreRelease() {
 
     const badge = document.createElement('div');
     badge.className = 'album-card__date';
-    badge.textContent = a.releaseDate ? formatReleaseDate(a.releaseDate) : 'Coming soon';
+    badge.textContent = shelfFull ? 'Shelf Full' : (a.releaseDate ? formatReleaseDate(a.releaseDate) : 'Coming soon');
     card.appendChild(badge);
 
     $preReleaseGrid.appendChild(card);
@@ -841,6 +847,7 @@ function archiveAlbum(id) {
   if (!a) return;
   a.archived = true;
   save();
+  checkPreReleases(); // shelf slot just freed up — promote a waiting release, if any
   render();
 }
 
@@ -861,6 +868,7 @@ function restoreAlbum(id) {
 function deleteAlbum(id) {
   albums = albums.filter(a => a.id !== id);
   save();
+  checkPreReleases(); // shelf slot just freed up — promote a waiting release, if any
   render();
 }
 
@@ -954,14 +962,9 @@ function openContextMenu(id) {
   $ctxMoveToShelf.classList.toggle('visible', currentView === 'prerelease');
   $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
 
-  // Each view exposes its own set of actions in the long-press menu. A ghost
-  // card (shelf placeholder for a release archived on a full shelf) is really
-  // an archived album wherever you long-press it from, so it always gets the
-  // Archive menu (Restore to Shelf / Delete) — otherwise it'd show the Shelf
-  // buttons while being fully inert, i.e. impossible to remove or restore.
-  const isGhost   = a.ghostUntil && Date.now() < a.ghostUntil;
-  const inArchive = currentView === 'archive' || isGhost;
-  const inVinyl   = currentView === 'vinyl' && !isGhost;
+  // Each view exposes its own set of actions in the long-press menu.
+  const inArchive = currentView === 'archive';
+  const inVinyl   = currentView === 'vinyl';
   $ctxBuy.classList.toggle('context-btn--hidden', !inVinyl);                // Buy: vinyl only
   $ctxVinyl.classList.toggle('context-btn--hidden', inArchive);            // in vinyl reads "Remove from Vinyl"
   $ctxArchive.classList.toggle('context-btn--hidden', inArchive || inVinyl);
@@ -1019,7 +1022,7 @@ function startLongPress(el, e) {
 
 // Attach the pointer lifecycle (down/move/up/cancel + suppressed contextmenu)
 // to a grid container. `cardSelector` picks the pressable element; `skip`
-// optionally marks cards that should stay inert (e.g. ghost cards).
+// optionally marks cards that should stay inert.
 function bindLongPress(container, cardSelector, skip) {
   container.addEventListener('pointerdown', e => {
     const el = e.target.closest(cardSelector);
@@ -1042,15 +1045,13 @@ function bindEvents() {
     btn.addEventListener('click', () => switchView(btn.dataset.view));
   });
 
-  // ── Long press on shelf (ghost cards ARE long-pressable — see openContextMenu,
-  //    which gives them the Archive menu so they can actually be restored or
-  //    deleted; only the tap-to-Spotify shortcut below stays disabled for them) ──
+  // ── Long press on shelf ───────────────────────────────────────────────────
   bindLongPress($shelf, '.album-card');
 
   $shelf.addEventListener('click', e => {
     if (lpFired) { lpFired = false; return; }
     const card = e.target.closest('.album-card');
-    if (!card || card.classList.contains('album-card--ghost')) return; // no Spotify tap on ghosts
+    if (!card) return;
     const a = albums.find(a => a.id === card.dataset.id);
     if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
   });
@@ -1063,6 +1064,10 @@ function bindEvents() {
     const card = e.target.closest('.album-card');
     if (!card) return;
     const a = albums.find(a => a.id === card.dataset.id);
+    // Once released with nowhere on the shelf to go, the Spotify shortcut is
+    // disabled (album's "current" release isn't really tracked as active
+    // listening yet) — everything else (long-press menu) still works normally.
+    if (a?.shelfFullSince) return;
     if (a?.spotifyUrl) window.location.href = toSpotifyUri(a.spotifyUrl);
   });
 
@@ -1083,6 +1088,7 @@ function bindEvents() {
     if (!a) return;
     // No shelf-size check — this reclassifies an existing album, not a new add
     a.preRelease = false;
+    delete a.shelfFullSince;
     save();
     render();
     showToast('Moved to shelf');
@@ -1205,6 +1211,8 @@ function bindEvents() {
     settings.shelfSize = parseInt($settingShelfSize.value, 10);
     $shelfSizeVal.textContent = settings.shelfSize;
     saveSettings();
+    checkPreReleases(); // raising the limit may free room for a waiting release
+    render();
   });
 
   let shopUrlTimer;
