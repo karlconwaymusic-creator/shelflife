@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="styles.css?v=68">
+  <link rel="stylesheet" href="styles.css?v=69">
   <!-- SW bootstrap — inline so it runs from the always-fresh index.html,
        not from potentially-stale cached app.js -->
   <script>
@@ -137,6 +137,15 @@
           </div>
           <input type="range" id="settingShelfSize" class="shelf-slider" min="4" max="20" step="4" value="12">
           <div class="settings-desc">Maximum number of albums on your shelf</div>
+        </div>
+
+        <div class="settings-row settings-row--col">
+          <div class="settings-title">Archive View</div>
+          <div class="segmented" role="group" aria-label="Archive view">
+            <button type="button" id="settingArchiveViewMosaic" class="segmented-btn" aria-pressed="true">Mosaic</button>
+            <button type="button" id="settingArchiveViewList" class="segmented-btn" aria-pressed="false">List</button>
+          </div>
+          <div class="settings-desc">Mosaic shows dense artwork tiles; List shows artist and title alongside each cover.</div>
         </div>
 
         <div class="settings-row settings-row--col">
@@ -357,6 +366,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=68"></script>
+  <script src="app.js?v=69"></script>
 </body>
 </html>

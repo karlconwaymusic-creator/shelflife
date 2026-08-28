@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v68'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v69'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -16,6 +16,7 @@ const SETTINGS_DEFAULTS = {
   archiveOnRemove: true,
   shelfSize:       12,
   shopUrl:         'https://towerrecords.ie/search?q=',
+  archiveView:     'mosaic', // 'mosaic' | 'list'
 };
 let settings = { ...SETTINGS_DEFAULTS };
 
@@ -228,6 +229,9 @@ function applySettingsUI() {
   $settingShelfSize.value    = settings.shelfSize;
   $shelfSizeVal.textContent  = settings.shelfSize;
   $settingShopUrl.value      = settings.shopUrl;
+  const isList = settings.archiveView === 'list';
+  $settingArchiveViewMosaic.setAttribute('aria-pressed', String(!isList));
+  $settingArchiveViewList.setAttribute('aria-pressed', String(isList));
   const $version = document.getElementById('appVersion');
   if ($version) $version.textContent = 'LPQ ' + APP_VERSION;
 }
@@ -473,6 +477,8 @@ const $settingArchive   = document.getElementById('settingArchive');
 const $settingShelfSize = document.getElementById('settingShelfSize');
 const $shelfSizeVal     = document.getElementById('shelfSizeVal');
 const $settingShopUrl   = document.getElementById('settingShopUrl');
+const $settingArchiveViewMosaic = document.getElementById('settingArchiveViewMosaic');
+const $settingArchiveViewList   = document.getElementById('settingArchiveViewList');
 const $preReleaseGrid  = document.getElementById('preReleaseGrid');
 const $preReleaseEmpty = document.getElementById('preReleaseEmpty');
 const $contextMenu   = document.getElementById('contextMenu');
@@ -763,19 +769,29 @@ function renderVinyl() {
   }
 }
 
-// Dense crate-digging mosaic: artwork only, desaturated via CSS.
-// Artist/title and Restore/Delete actions live in the long-press menu.
+// Mosaic: dense crate-digging grid, artwork only, desaturated via CSS.
+// List: compact rows with artist/title visible, same desaturation treatment.
+// Both share the same long-press menu (Restore to Shelf / Buy on Vinyl / Delete)
+// — see openContextMenu(), which is view-driven rather than DOM-structure-driven.
 function renderArchive() {
   const archived = albums.filter(a => a.archived);
+  const isList = settings.archiveView === 'list';
+  $archiveGrid.className = isList ? 'archive-list' : 'archive-grid';
   $archiveGrid.innerHTML = '';
   $archiveEmpty.style.display = archived.length ? 'none' : 'flex';
 
   for (const a of archived) {
-    const cell = document.createElement('div');
-    cell.className = 'archive-cell';
-    cell.dataset.id = a.id;
-    cell.setAttribute('role', 'listitem');
-    cell.setAttribute('aria-label', `${a.title} by ${a.artist}, archived`);
+    const item = document.createElement('div');
+    item.className = isList ? 'archive-row' : 'archive-cell';
+    item.dataset.id = a.id;
+    item.setAttribute('role', 'listitem');
+    item.setAttribute('aria-label', `${a.title} by ${a.artist}, archived`);
+
+    const artWrap = isList ? document.createElement('div') : item;
+    if (isList) {
+      artWrap.className = 'archive-row-thumb';
+      item.appendChild(artWrap);
+    }
 
     if (a.art) {
       const img = document.createElement('img');
@@ -786,15 +802,24 @@ function renderArchive() {
       img.width  = 640;   // explicit intrinsic size — image load can never reflow the grid
       img.height = 640;
       img.decoding = 'async';
-      cell.appendChild(img);
+      artWrap.appendChild(img);
     } else {
       const noArt = document.createElement('div');
       noArt.className = 'album-no-art';
       noArt.textContent = '♪';
-      cell.appendChild(noArt);
+      artWrap.appendChild(noArt);
     }
 
-    $archiveGrid.appendChild(cell);
+    if (isList) {
+      const meta = document.createElement('div');
+      meta.className = 'archive-row-meta';
+      meta.innerHTML =
+        `<div class="archive-row-title">${esc(a.title)}</div>` +
+        `<div class="archive-row-artist">${esc(a.artist)}</div>`;
+      item.appendChild(meta);
+    }
+
+    $archiveGrid.appendChild(item);
   }
 }
 
@@ -989,11 +1014,30 @@ function openContextMenu(id) {
   const inArchive = currentView === 'archive';
   const inVinyl   = currentView === 'vinyl';
   $ctxBuy.classList.toggle('context-btn--hidden', !inVinyl);                // Buy: vinyl only
-  $ctxVinyl.classList.toggle('context-btn--hidden', inArchive);            // in vinyl reads "Remove from Vinyl"
+  $ctxVinyl.classList.toggle('context-btn--hidden', false);                // now shown everywhere, incl. Archive
   $ctxArchive.classList.toggle('context-btn--hidden', inArchive || inVinyl);
   $ctxRemove.classList.toggle('context-btn--hidden', inArchive || inVinyl);
   $ctxRestore.classList.toggle('context-btn--hidden', !inArchive);
   $ctxDelete.classList.toggle('context-btn--hidden', !inArchive);
+
+  // .context-actions is a flex column; visual stacking order is controlled
+  // here per-view (via style.order) rather than by moving shared DOM nodes
+  // around, since $ctxVinyl/$ctxWiki etc. are reused across every view.
+  const ORDER_BY_VIEW = {
+    shelf:      { wiki: 0, vinyl: 1, archive: 2, remove: 3 },
+    vinyl:      { wiki: 0, buy: 1, vinyl: 2 },
+    prerelease: { wiki: 0, vinyl: 1, moveToShelf: 2, archive: 3, remove: 4 },
+    archive:    { wiki: 0, restore: 1, vinyl: 2, delete: 3 }, // Restore to Shelf, Buy on Vinyl, Delete
+  };
+  const ord = ORDER_BY_VIEW[currentView] || ORDER_BY_VIEW.shelf;
+  $ctxWiki.style.order        = ord.wiki        ?? 0;
+  $ctxBuy.style.order         = ord.buy         ?? 0;
+  $ctxVinyl.style.order       = ord.vinyl       ?? 0;
+  $ctxMoveToShelf.style.order = ord.moveToShelf ?? 0;
+  $ctxArchive.style.order     = ord.archive     ?? 0;
+  $ctxRemove.style.order      = ord.remove      ?? 0;
+  $ctxRestore.style.order     = ord.restore     ?? 0;
+  $ctxDelete.style.order      = ord.delete      ?? 0;
 
   // Fetch label on-demand if not yet confirmed (null = untried; '' = no MusicBrainz match)
   if (a.label == null && a.artist && a.title) {
@@ -1095,7 +1139,7 @@ function bindEvents() {
   });
 
   // ── Long press on archive mosaic (no tap action — menu only) ─────────────
-  bindLongPress($archiveGrid, '.archive-cell');
+  bindLongPress($archiveGrid, '.archive-cell, .archive-row'); // both Mosaic and List views
 
   // ── Long press on vinyl rows (mirrors shelf) ─────────────────────────────
   bindLongPress($vinylList, '.vinyl-row');
@@ -1247,6 +1291,15 @@ function bindEvents() {
       saveSettings();
     }, 600);
   });
+
+  const setArchiveView = (view) => {
+    settings.archiveView = view;
+    saveSettings();
+    applySettingsUI();
+    renderArchive();
+  };
+  $settingArchiveViewMosaic.addEventListener('click', () => setArchiveView('mosaic'));
+  $settingArchiveViewList.addEventListener('click', () => setArchiveView('list'));
 
   // ── Spotify URL input ─────────────────────────────────────────────────────
   let lookupTimer;

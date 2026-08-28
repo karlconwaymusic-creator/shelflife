@@ -441,7 +441,9 @@ main { padding: 0; }
   letter-spacing: 0.01em;
 }
 
-.context-actions { padding: 0; }
+/* Flex column so per-view button ordering (openContextMenu sets .style.order
+   on each button) controls visual stacking without moving DOM nodes around. */
+.context-actions { padding: 0; display: flex; flex-direction: column; }
 
 .context-btn {
   display: flex;
@@ -475,7 +477,7 @@ main { padding: 0; }
 /* ─── Archive mosaic grid ─────────────────────────────────────────────────── */
 .archive-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(4, 1fr); /* was 5 — larger artwork on standard phone screens */
   gap: 2px;
 }
 
@@ -499,6 +501,96 @@ main { padding: 0; }
 }
 
 .archive-cell .album-no-art { font-size: 1.4rem; }
+
+/* ─── Archive list view — compact rows, artist/title visible ──────────────── */
+.archive-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.archive-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.archive-row:last-child { border-bottom: none; }
+
+.archive-row-thumb {
+  width: 50px; height: 50px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--surface2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Same desaturation treatment as the mosaic tiles */
+.archive-row-thumb img,
+.archive-row-thumb .album-no-art {
+  filter: saturate(0.5);
+}
+.archive-row-thumb img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.archive-row-thumb .album-no-art {
+  font-size: 1.2rem;
+  color: var(--text3);
+}
+
+.archive-row-meta { flex: 1; min-width: 0; }
+.archive-row-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.archive-row-artist {
+  font-size: 0.78rem;
+  color: var(--text2);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── Settings: Archive View segmented control ─────────────────────────────── */
+.segmented {
+  display: flex;
+  background: var(--surface2);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 3px;
+}
+.segmented-btn {
+  flex: 1;
+  padding: 8px 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, color 0.15s;
+}
+.segmented-btn[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--text);
+}
 
 @media (min-width: 600px) {
   .context-menu { align-items: center; justify-content: center; }
