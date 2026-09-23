@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="styles.css?v=69">
+  <link rel="stylesheet" href="styles.css?v=70">
   <!-- SW bootstrap — inline so it runs from the always-fresh index.html,
        not from potentially-stale cached app.js -->
   <script>
@@ -100,7 +100,7 @@
 
     <!-- Vinyl view -->
     <div id="viewVinyl" class="view view--hidden">
-      <div id="vinylList" class="vinyl-list" role="list" aria-label="Vinyl wishlist"></div>
+      <div id="vinylList" class="vinyl-list" role="list" aria-label="Get Physical wishlist"></div>
       <div id="vinylEmpty" class="empty-state" aria-hidden="true">
         <div class="empty-icon">
           <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -110,7 +110,7 @@
             <circle cx="36" cy="36" r="3"  fill="currentColor" opacity="0.4"/>
           </svg>
         </div>
-        <p class="empty-title">No vinyl wishlist yet</p>
+        <p class="empty-title">No Get Physical wishlist yet</p>
         <p class="empty-sub">Long-press an album and choose Buy on Vinyl</p>
       </div>
     </div>
@@ -151,7 +151,16 @@
         <div class="settings-row settings-row--col">
           <div class="settings-title">Record Shop URL</div>
           <input type="url" id="settingShopUrl" class="input settings-input" placeholder="https://towerrecords.ie/search?q=" autocomplete="off" inputmode="url" spellcheck="false">
-          <div class="settings-desc">Enter your shop's search URL, e.g. https://towerrecords.ie/search?q= — LPQ will append the artist and album name automatically.</div>
+          <div class="settings-desc">Enter your shop's search URL, e.g. https://towerrecords.ie/search?q= — LPQ will append the artist, album name, and your preferred format automatically.</div>
+        </div>
+
+        <div class="settings-row settings-row--col">
+          <div class="settings-title">Preferred Format</div>
+          <div class="segmented" role="group" aria-label="Preferred format">
+            <button type="button" id="settingFormatVinyl" class="segmented-btn" aria-pressed="true">Vinyl</button>
+            <button type="button" id="settingFormatCD" class="segmented-btn" aria-pressed="false">CD</button>
+          </div>
+          <div class="settings-desc">Included alongside the artist and album title when you tap Buy on the Get Physical tab.</div>
         </div>
 
         <div class="settings-row settings-row--col">
@@ -209,13 +218,13 @@
       </svg>
       <span>Shelf</span>
     </button>
-    <button class="tab-btn" data-view="vinyl" aria-label="Vinyl">
+    <button class="tab-btn" data-view="vinyl" aria-label="Get Physical">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <circle cx="12" cy="12" r="10"/>
         <circle cx="12" cy="12" r="3.5"/>
         <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>
       </svg>
-      <span>Vinyl</span>
+      <span>Get Physical</span>
     </button>
     <button class="tab-btn" data-view="settings" aria-label="Settings">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -366,6 +375,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=69"></script>
+  <script src="app.js?v=70"></script>
 </body>
 </html>

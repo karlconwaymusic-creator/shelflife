@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v69'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v70'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -17,6 +17,7 @@ const SETTINGS_DEFAULTS = {
   shelfSize:       12,
   shopUrl:         'https://towerrecords.ie/search?q=',
   archiveView:     'mosaic', // 'mosaic' | 'list'
+  preferredFormat: 'Vinyl', // 'Vinyl' | 'CD' — appended verbatim to the Buy search query
 };
 let settings = { ...SETTINGS_DEFAULTS };
 
@@ -232,6 +233,9 @@ function applySettingsUI() {
   const isList = settings.archiveView === 'list';
   $settingArchiveViewMosaic.setAttribute('aria-pressed', String(!isList));
   $settingArchiveViewList.setAttribute('aria-pressed', String(isList));
+  const isCD = settings.preferredFormat === 'CD';
+  $settingFormatVinyl.setAttribute('aria-pressed', String(!isCD));
+  $settingFormatCD.setAttribute('aria-pressed', String(isCD));
   const $version = document.getElementById('appVersion');
   if ($version) $version.textContent = 'LPQ ' + APP_VERSION;
 }
@@ -479,6 +483,8 @@ const $shelfSizeVal     = document.getElementById('shelfSizeVal');
 const $settingShopUrl   = document.getElementById('settingShopUrl');
 const $settingArchiveViewMosaic = document.getElementById('settingArchiveViewMosaic');
 const $settingArchiveViewList   = document.getElementById('settingArchiveViewList');
+const $settingFormatVinyl = document.getElementById('settingFormatVinyl');
+const $settingFormatCD    = document.getElementById('settingFormatCD');
 const $preReleaseGrid  = document.getElementById('preReleaseGrid');
 const $preReleaseEmpty = document.getElementById('preReleaseEmpty');
 const $contextMenu   = document.getElementById('contextMenu');
@@ -1191,8 +1197,9 @@ function bindEvents() {
     if (!id) return;
     const a = albums.find(a => a.id === id);
     if (!a) return;
-    const base = settings.shopUrl || SETTINGS_DEFAULTS.shopUrl;
-    window.open(base + encodeURIComponent(a.artist + ' ' + a.title), '_blank');
+    const base   = settings.shopUrl || SETTINGS_DEFAULTS.shopUrl;
+    const format = settings.preferredFormat || SETTINGS_DEFAULTS.preferredFormat;
+    window.open(base + encodeURIComponent(a.artist + ' ' + a.title + ' ' + format), '_blank');
     closeContextMenu();
   });
 
@@ -1201,7 +1208,7 @@ function bindEvents() {
     if (!id) return;
     toggleVinyl(id);
     const a = albums.find(a => a.id === id);
-    showToast(a?.vinyl ? 'Added to vinyl wishlist' : 'Removed from vinyl wishlist');
+    showToast(a?.vinyl ? 'Added to Get Physical wishlist' : 'Removed from Get Physical wishlist');
     renderVinyl();
     closeContextMenu();
   });
@@ -1301,6 +1308,14 @@ function bindEvents() {
   $settingArchiveViewMosaic.addEventListener('click', () => setArchiveView('mosaic'));
   $settingArchiveViewList.addEventListener('click', () => setArchiveView('list'));
 
+  const setPreferredFormat = (format) => {
+    settings.preferredFormat = format;
+    saveSettings();
+    applySettingsUI();
+  };
+  $settingFormatVinyl.addEventListener('click', () => setPreferredFormat('Vinyl'));
+  $settingFormatCD.addEventListener('click', () => setPreferredFormat('CD'));
+
   // ── Spotify URL input ─────────────────────────────────────────────────────
   let lookupTimer;
   $spotifyInput.addEventListener('input', () => {
@@ -1368,7 +1383,7 @@ function bindEvents() {
         $fetchLoading.hidden  = true;
         $albumPreview.hidden  = false;
         $submitBtn.disabled   = false;
-        $submitBtn.textContent = isVinyl ? 'Add to Vinyl' : isPre ? 'Add to Pre-Releases' : 'Add to Shelf';
+        $submitBtn.textContent = isVinyl ? 'Add to Get Physical' : isPre ? 'Add to Pre-Releases' : 'Add to Shelf';
       } catch {
         if (seq !== lookupSeq) return; // stale failure — don't flash an error for it
         $fetchLoading.hidden  = true;
