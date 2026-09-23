@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v71'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v72'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -236,6 +236,8 @@ function applySettingsUI() {
   const isCD = settings.preferredFormat === 'CD';
   $settingFormatVinyl.setAttribute('aria-pressed', String(!isCD));
   $settingFormatCD.setAttribute('aria-pressed', String(isCD));
+  const preferredFormat = settings.preferredFormat || SETTINGS_DEFAULTS.preferredFormat;
+  if ($vinylEmptySub) $vinylEmptySub.textContent = `Long-press an album and choose Buy on ${preferredFormat}`;
   const $version = document.getElementById('appVersion');
   if ($version) $version.textContent = 'LPQ ' + APP_VERSION;
 }
@@ -458,6 +460,7 @@ const $shelf         = document.getElementById('shelf');
 const $empty         = document.getElementById('emptyState');
 const $vinylList     = document.getElementById('vinylList');
 const $vinylEmpty    = document.getElementById('vinylEmpty');
+const $vinylEmptySub = document.getElementById('vinylEmptySub');
 const $archiveGrid   = document.getElementById('archiveGrid');
 const $archiveEmpty  = document.getElementById('archiveEmpty');
 const $modal         = document.getElementById('modal');
@@ -1011,9 +1014,11 @@ function openContextMenu(id) {
   }
   $ctxTitle.textContent = a.title;
   $ctxArtist.textContent = buildCtxSub(a);
-  // "Remove from..." names the Get Physical section/wishlist; "Buy on Vinyl"
-  // names the format itself, so only the removal side changes with the rename.
-  $ctxVinylLbl.textContent = a.vinyl ? 'Remove from Get Physical' : 'Buy on Vinyl';
+  // "Remove from..." names the Get Physical section/wishlist. "Buy on..."
+  // names the format itself, so it tracks the Preferred Format setting —
+  // "Buy on Vinyl" or "Buy on CD" — rather than being hardcoded to Vinyl.
+  const preferredFormat = settings.preferredFormat || SETTINGS_DEFAULTS.preferredFormat;
+  $ctxVinylLbl.textContent = a.vinyl ? 'Remove from Get Physical' : `Buy on ${preferredFormat}`;
   $ctxVinyl.classList.toggle('context-btn--active', !!a.vinyl);
   $ctxMoveToShelf.classList.toggle('visible', currentView === 'prerelease');
   $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
