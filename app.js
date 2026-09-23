@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v70'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v71'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -1011,7 +1011,9 @@ function openContextMenu(id) {
   }
   $ctxTitle.textContent = a.title;
   $ctxArtist.textContent = buildCtxSub(a);
-  $ctxVinylLbl.textContent = a.vinyl ? 'Remove from Vinyl' : 'Buy on Vinyl';
+  // "Remove from..." names the Get Physical section/wishlist; "Buy on Vinyl"
+  // names the format itself, so only the removal side changes with the rename.
+  $ctxVinylLbl.textContent = a.vinyl ? 'Remove from Get Physical' : 'Buy on Vinyl';
   $ctxVinyl.classList.toggle('context-btn--active', !!a.vinyl);
   $ctxMoveToShelf.classList.toggle('visible', currentView === 'prerelease');
   $ctxRemoveLbl.textContent = a.preRelease ? 'Remove' : 'Remove from Shelf';
