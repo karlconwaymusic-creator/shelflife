@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v74'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v75'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -131,9 +131,17 @@ async function backfillYears() {
         continue; // 404 / other error — skip this album, keep going
       }
       const d = await res.json();
-      if (d.release_date && !a.year)        { a.year = d.release_date.slice(0, 4); changed = true; }
-      if (d.release_date && !a.releaseDate) { a.releaseDate = d.release_date;      changed = true; }
-      if (d.artists?.length && !a.artist)   { a.artist = d.artists.map(x => x.name).join(', '); changed = true; }
+      // A reissue/pre-save can already have a catalog entry whose release_date
+      // is the ORIGINAL recording, not the upcoming release — see
+      // scrapeCountdownDate() above for why the per-track restriction is the
+      // tell and where the true date actually lives.
+      let releaseDate = d.release_date ?? null;
+      if (releaseDate && d.tracks?.items?.some(t => t.restrictions?.reason === 'market')) {
+        releaseDate = (await scrapeCountdownDate(d.external_urls.spotify)) ?? releaseDate;
+      }
+      if (releaseDate && !a.year)          { a.year = releaseDate.slice(0, 4); changed = true; }
+      if (releaseDate && !a.releaseDate)   { a.releaseDate = releaseDate;      changed = true; }
+      if (d.artists?.length && !a.artist)  { a.artist = d.artists.map(x => x.name).join(', '); changed = true; }
     } catch (err) {
       console.warn('[LPQ] backfillYears failed for', a.title, err);
     }
@@ -278,6 +286,59 @@ function extractAlbumId(url) {
   return null;
 }
 
+// Some reissues/pre-saves already have a real catalog ID and a plain /album/
+// URL, but the catalog's release_date reflects the ORIGINAL recording, not
+// the upcoming reissue — e.g. a 1996 CD getting its first vinyl press in 2026
+// still reports release_date: '1996-06-10'. The response still gives it away
+// though: every track carries restrictions.reason === 'market' until the
+// release actually drops, which an already-released album never has. When
+// that's set, the true date only exists in Spotify's rendered page copy
+// ("Releases on <Month D, YYYY>") — resolved the same way as /prerelease/
+// pages, via r.jina.ai (see fetchPreReleaseMeta below).
+async function scrapeCountdownDate(albumUrl) {
+  const t = () => AbortSignal.timeout(6000);
+  const attempts = [
+    async () => (await fetch(albumUrl, { signal: t() })).text(),
+    async () => (await fetch('https://r.jina.ai/' + albumUrl, { signal: t() })).text(),
+  ];
+  const pattern = /Releases on ([A-Za-z]+ \d{1,2}, \d{4})/;
+  for (const attempt of attempts) {
+    try {
+      const text = await attempt();
+      const m = text?.match(pattern);
+      if (m) {
+        const parsed = new Date(m[1]);
+        if (!isNaN(parsed)) {
+          return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+        }
+      }
+    } catch (err) {
+      console.log('[LPQ] countdown scrape attempt failed:', err?.message || err);
+    }
+  }
+  return null;
+}
+
+// Turn a catalog API album response into the shape fetchSpotifyAlbum returns,
+// correcting release_date for the not-actually-out-yet case above.
+async function catalogToResult(d) {
+  let releaseDate = d.release_date ?? null;
+  const notYetOut = d.tracks?.items?.some(t => t.restrictions?.reason === 'market');
+  if (notYetOut) {
+    const countdown = await scrapeCountdownDate(d.external_urls.spotify);
+    if (countdown) releaseDate = countdown;
+  }
+  return {
+    title:       d.name,
+    artist:      d.artists.map(a => a.name).join(', '),
+    art:         d.images[0]?.url ?? null,
+    spotifyUrl:  d.external_urls.spotify,
+    year:        releaseDate ? releaseDate.slice(0, 4) : null,
+    releaseDate: releaseDate,
+    label:       d.label ?? null,
+  };
+}
+
 async function fetchSpotifyAlbum(albumId, rawUrl) {
   // /prerelease/ IDs are never in the catalog (always 404), so skip the
   // catalog round-trips entirely: scrape the embed page (artist, date,
@@ -321,15 +382,7 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
     });
     if (res.ok) {
       const d = await res.json();
-      return {
-        title:       d.name,
-        artist:      d.artists.map(a => a.name).join(', '),
-        art:         d.images[0]?.url ?? null,
-        spotifyUrl:  d.external_urls.spotify,
-        year:        d.release_date ? d.release_date.slice(0, 4) : null,
-        releaseDate: d.release_date ?? null,
-        label:       d.label ?? null,
-      };
+      return await catalogToResult(d);
     }
   } catch {}
 
@@ -352,15 +405,7 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
       });
       if (res2.ok) {
         const cd = await res2.json();
-        return {
-          title:       cd.name,
-          artist:      cd.artists.map(a => a.name).join(', '),
-          art:         cd.images[0]?.url ?? null,
-          spotifyUrl:  cd.external_urls.spotify,
-          year:        cd.release_date ? cd.release_date.slice(0, 4) : null,
-          releaseDate: cd.release_date ?? null,
-          label:       cd.label ?? null,
-        };
+        return await catalogToResult(cd);
       } else {
         console.log('[LPQ] catalog retry failed:', res2.status, 'embedId:', embedId);
       }
@@ -1503,8 +1548,11 @@ function onSubmit(e) {
   }
   // Artist / date fields are only shown for pre-releases; shelf/vinyl use whatever the API returned.
   const artist = fetchedAlbum.artist || (currentView === 'prerelease' ? $artistInput.value.trim() : '');
+  // On the pre-release tab the date field is pre-filled but user-editable —
+  // it must win over the fetched value, not just fill a gap, so a manual
+  // correction (e.g. a reissue whose catalog date is wrong) actually sticks.
   const manualDate = currentView === 'prerelease' ? $releaseDateInput.value || null : null;
-  const releaseDate = fetchedAlbum.releaseDate ?? manualDate;
+  const releaseDate = currentView === 'prerelease' ? (manualDate ?? fetchedAlbum.releaseDate) : fetchedAlbum.releaseDate;
   const album = {
     id:          uid(),
     title:       fetchedAlbum.title,
