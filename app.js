@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v73'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v74'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -94,8 +94,11 @@ function moveAlbumToFront(id) {
   if (idx > 0) albums.unshift(albums.splice(idx, 1)[0]);
 }
 
-// Silently fetch release years / dates for albums that pre-date those features.
-// Pre-release albums are skipped — oEmbed never returns year for unreleased content.
+// Silently fetch release year/date/artist for albums added before Spotify's
+// catalog had them — e.g. a just-announced album added via a plain /album/
+// URL 404s the catalog at add time and falls back to oEmbed, which has no
+// artist or date at all. Retried here on every boot until the catalog
+// catches up. Pre-release albums are skipped — that's backfillPreReleaseMeta().
 // Runs with a 300 ms gap between requests to stay well under Spotify's rate limit.
 // Record labels are NOT fetched here — Spotify's catalog API returns label:null
 // for every album regardless of how well-documented it is (confirmed by direct
@@ -105,7 +108,7 @@ async function backfillYears() {
   const needsData = albums.filter(a =>
     a.spotifyUrl &&
     !a.spotifyUrl.includes('/prerelease/') &&
-    (!a.year || !a.releaseDate)
+    (!a.year || !a.releaseDate || !a.artist)
   );
   if (!needsData.length) return;
   let changed = false;
@@ -130,6 +133,7 @@ async function backfillYears() {
       const d = await res.json();
       if (d.release_date && !a.year)        { a.year = d.release_date.slice(0, 4); changed = true; }
       if (d.release_date && !a.releaseDate) { a.releaseDate = d.release_date;      changed = true; }
+      if (d.artists?.length && !a.artist)   { a.artist = d.artists.map(x => x.name).join(', '); changed = true; }
     } catch (err) {
       console.warn('[LPQ] backfillYears failed for', a.title, err);
     }
