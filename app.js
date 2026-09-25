@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v72'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v73'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -293,7 +293,7 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
         spotifyUrl:  rawUrl.split('?')[0],
         year:        meta.releaseDate ? meta.releaseDate.slice(0, 4) : null,
         releaseDate: meta.releaseDate,
-        label:       null,
+        label:       meta.label ?? null,
       };
     }
     if (!oe?.title) throw new Error('Album not found');
@@ -380,65 +380,87 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
   };
 }
 
-// ─── Pre-release metadata scrape ──────────────────────────────────────────────
-// open.spotify.com/embed/prerelease/{id} embeds a __NEXT_DATA__ JSON blob with
-// entity.subtitle (artist), entity.releaseDate.isoString and full-size art.
-// The page itself sends no CORS headers, so a direct fetch only works if
-// Spotify ever relaxes that — we fall back to public CORS relays.
+// ─── Pre-release metadata resolution ───────────────────────────────────────────
+// /prerelease/ IDs 404 on the catalog API and don't surface in catalog search,
+// but a real catalog album ID exists for them once Spotify mints one — visible
+// as a "Play on Spotify" link on the rendered embed page, even when search
+// can't find the album by name. Resolving to that ID and then hitting the
+// catalog API gives fully accurate title/artist/date/label/art straight from
+// Spotify itself — far more robust than parsing Spotify's internal frontend
+// JSON (embed HTML's own __NEXT_DATA__ echoes the prerelease ID, not the
+// catalog one, and breaks on any Spotify frontend redesign).
+//
+// Previously used free CORS-relay tools (corsproxy.io, allorigins.win) both
+// died within the same session — one got paywalled, one went persistently
+// unreachable (522). Replaced with r.jina.ai's Reader API: a maintained
+// commercial product (not a hobby CORS-bypass tool), with proper
+// origin-reflecting CORS headers and a generous 20 req/min rate limit,
+// verified directly against Spotify's embed pages before shipping this.
 async function fetchPreReleaseMeta(prereleaseUrl) {
   const id = extractAlbumId(prereleaseUrl);
   if (!id) return null;
   const embedUrl = 'https://open.spotify.com/embed/prerelease/' + id;
-  // Each attempt gets a hard timeout so one slow relay can't stall the lookup.
-  const t = () => AbortSignal.timeout(4000);
+  const t = () => AbortSignal.timeout(6000);
+  const catalogLinkPattern = /open\.spotify\.com\/album\/([A-Za-z0-9]+)/;
+
   const attempts = [
-    // 1. Direct — near-instant fail on CORS, future-proof if Spotify opens it
+    // 1. Direct fetch — free, near-instant fail on CORS today; future-proof
+    //    if Spotify ever relaxes that.
     async () => (await fetch(embedUrl, { signal: t() })).text(),
-    // 2. corsproxy.io — fastest relay in live browser testing
-    async () => (await fetch('https://corsproxy.io/?url=' + encodeURIComponent(embedUrl), { signal: t() })).text(),
-    // 3. allorigins JSON wrapper — slower and flakier, last resort
-    async () => {
-      const r = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(embedUrl), { signal: t() });
-      return (await r.json()).contents;
-    },
+    // 2. r.jina.ai Reader — renders the page and returns clean text
+    //    containing the real catalog link.
+    async () => (await fetch('https://r.jina.ai/' + embedUrl, { signal: t() })).text(),
   ];
+
+  let catalogId = null;
   for (const attempt of attempts) {
     try {
-      const html = await attempt();
-      if (!html) continue;
-      const m = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
-      if (!m) continue;
-      const entity = JSON.parse(m[1])?.props?.pageProps?.state?.data?.entity;
-      if (!entity) continue;
-      const iso = entity.releaseDate?.isoString || null;
-      const images = entity.visualIdentity?.image || [];
-      const art = images.slice().sort((a, b) => (b.maxWidth || 0) - (a.maxWidth || 0))[0]?.url || null;
-      return {
-        title:       entity.title || entity.name || null,
-        artist:      entity.subtitle || null,
-        // isoString is the release INSTANT — midnight of release day in some
-        // timezone that varies with the requesting vantage (we've observed
-        // 23:00Z day-before, 04:00Z, and 11:00Z day-before for one July 17
-        // release). The calendar date is the date at that instant in Earth's
-        // earliest timezone (UTC+14): add 14h, then take the UTC date. This is
-        // vantage- and device-timezone-independent; naive slicing was storing
-        // dates a day early and promoting albums before release.
-        releaseDate: iso
-          ? new Date(new Date(iso).getTime() + 14 * 3600 * 1000).toISOString().slice(0, 10)
-          : null,
-        art,
-      };
+      const text = await attempt();
+      const m = text?.match(catalogLinkPattern);
+      if (m) { catalogId = m[1]; break; }
     } catch (err) {
-      console.log('[LPQ] prerelease meta attempt failed:', err?.message || err);
+      console.log('[LPQ] prerelease resolve attempt failed:', err?.message || err);
     }
   }
-  return null;
+  if (!catalogId) return null;
+
+  // Full, accurate metadata straight from Spotify's own catalog API. Its
+  // release_date is a plain YYYY-MM-DD, unlike the embed page's ambiguous
+  // vantage-dependent ISO instant — no timezone-anchoring math needed here.
+  try {
+    const token = await getSpotifyToken();
+    const res = await fetch(`https://api.spotify.com/v1/albums/${catalogId}`, {
+      headers: { 'Authorization': 'Bearer ' + token },
+      signal: t(),
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    return {
+      title:       d.name ?? null,
+      artist:      d.artists?.map(x => x.name).join(', ') || null,
+      releaseDate: d.release_date ?? null,
+      // No `label` here — Spotify's catalog API returns null for it on every
+      // album regardless of auth path (confirmed directly against this same
+      // resolved ID). Labels come from MusicBrainz — see backfillPreReleaseMeta().
+      art:         d.images?.[0]?.url ?? null,
+    };
+  } catch (err) {
+    console.log('[LPQ] catalog lookup for resolved prerelease id failed:', err?.message || err);
+    return null;
+  }
 }
 
 // Refresh artist / release date for every pre-release with a /prerelease/ URL,
 // once per boot. Always re-scrapes rather than only filling gaps: it corrects
 // dates stored a day early by the old UTC-slicing bug, and picks up release
 // dates Spotify has shifted since the album was added.
+//
+// Label is fetched from MusicBrainz right here rather than left to the
+// separately-scheduled backfillLabels() pass: that pass builds its
+// needs-a-label list synchronously at call time, before this function's own
+// async artist/title updates have saved — so on an album whose artist/title
+// only just got filled in by THIS pass, backfillLabels() would already have
+// skipped it and it wouldn't catch up until the next app load.
 async function backfillPreReleaseMeta() {
   const needs = albums.filter(a => a.preRelease && a.spotifyUrl?.includes('/prerelease/'));
   for (const a of needs) {
@@ -449,6 +471,10 @@ async function backfillPreReleaseMeta() {
     if (meta.releaseDate && a.releaseDate !== meta.releaseDate) {
       a.releaseDate = meta.releaseDate;
       a.year = meta.releaseDate.slice(0, 4);
+      changed = true;
+    }
+    if (a.label == null && a.artist && a.title) {
+      a.label = await fetchLabelFromMusicBrainz(a.artist, a.title); // '' if no match
       changed = true;
     }
     if (changed) { save(); render(); }
@@ -1444,7 +1470,15 @@ function resetForm() {
   $releaseDateField.classList.remove('visible');
   $releaseDateInput.value = '';
   $submitBtn.disabled    = true;
-  $submitBtn.textContent = 'Add to Shelf';
+  // Default label matches the tab the modal was opened from — was hardcoded
+  // to 'Add to Shelf' regardless of view, so it showed the wrong destination
+  // the whole time you were typing a URL, only correcting itself once a
+  // lookup succeeded and the currentView-aware logic in onSubmit's preview
+  // path took over.
+  $submitBtn.textContent =
+    currentView === 'vinyl'      ? 'Add to Get Physical' :
+    currentView === 'prerelease' ? 'Add to Pre-Releases'  :
+                                    'Add to Shelf';
 }
 
 // ─── Submit ───────────────────────────────────────────────────────────────────
