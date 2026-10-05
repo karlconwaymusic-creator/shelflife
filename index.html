@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="styles.css?v=76">
+  <link rel="stylesheet" href="styles.css?v=77">
   <!-- SW bootstrap — inline so it runs from the always-fresh index.html,
        not from potentially-stale cached app.js -->
   <script>
@@ -161,6 +161,14 @@
             <button type="button" id="settingFormatCD" class="segmented-btn" aria-pressed="false">CD</button>
           </div>
           <div class="settings-desc">Included alongside the artist and album title when you tap Buy on the Get Physical tab.</div>
+        </div>
+
+        <div class="settings-row settings-row--col">
+          <div class="settings-title">Lookup Diagnostics</div>
+          <input type="url" id="diagUrl" class="input settings-input" placeholder="Paste a Spotify album link" autocomplete="off" inputmode="url" spellcheck="false">
+          <button type="button" id="diagRun" class="segmented-btn" style="align-self:flex-start">Run diagnostics</button>
+          <pre id="diagOut" class="settings-desc" style="white-space:pre-wrap; word-break:break-word; user-select:text;"></pre>
+          <div class="settings-desc">Troubleshooting only — shows where an album lookup fails on this device.</div>
         </div>
 
         <div class="settings-row settings-row--col">
@@ -375,6 +383,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=76"></script>
+  <script src="app.js?v=77"></script>
 </body>
 </html>

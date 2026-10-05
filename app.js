@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v76'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v77'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -1228,7 +1228,51 @@ function bindLongPress(container, cardSelector, skip) {
 }
 
 // ─── Event wiring ─────────────────────────────────────────────────────────────
+// Settings → Lookup Diagnostics: runs each stage of an album lookup on this
+// device and prints the outcome, so a failure that only happens on one
+// phone/network can be pinpointed without devtools.
+async function runLookupDiagnostics(rawUrl) {
+  const out = document.getElementById('diagOut');
+  const lines = [];
+  const log = s => { lines.push(s); out.textContent = lines.join('\n'); };
+  const step = async (name, fn) => {
+    const t0 = Date.now();
+    try { log(`${name}: ${await fn()} (${Date.now() - t0}ms)`); }
+    catch (e) { log(`${name}: FAILED ${e?.name || ''} ${e?.message || e} (${Date.now() - t0}ms)`); }
+  };
+  const id = extractAlbumId(rawUrl);
+  log(`${APP_VERSION} | online=${navigator.onLine} | AbortSignal.timeout=${typeof AbortSignal?.timeout} | rateLimitedUntil=${getRateLimit() || 'none'}`);
+  if (!id) { log('No album id found in that link'); return; }
+  const url = 'https://open.spotify.com/album/' + id;
+  let token = null;
+  await step('1 token', async () => { token = await getSpotifyToken(); return 'ok'; });
+  await step('2 catalog', async () => {
+    const r = await fetch('https://api.spotify.com/v1/albums/' + id, { headers: { Authorization: 'Bearer ' + token } });
+    if (!r.ok) return 'HTTP ' + r.status + ' retry-after=' + r.headers.get('retry-after');
+    const d = await r.json();
+    return `${d.name} | ${d.release_date} | restricted=${!!d.tracks?.items?.some(t => t.restrictions?.reason === 'market')}`;
+  });
+  await step('3 oembed', async () => {
+    const r = await fetch('https://open.spotify.com/oembed?url=' + encodeURIComponent(url));
+    return r.ok ? (await r.json()).title : 'HTTP ' + r.status;
+  });
+  await step('4 page-read', async () => {
+    const r = await fetch('https://r.jina.ai/' + url, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return 'HTTP ' + r.status;
+    const text = await r.text();
+    return `${text.length} chars | releases=${(text.match(/Releases on [^\n]*/) || ['none'])[0]} | title=${(text.match(/^Title: .*$/m) || ['none'])[0]}`;
+  });
+  await step('5 full lookup', async () => {
+    const r = await fetchSpotifyAlbum(id, url);
+    return `${r.title} | ${r.artist || '(no artist)'} | ${r.releaseDate || '(no date)'}`;
+  });
+}
+
 function bindEvents() {
+  document.getElementById('diagRun').addEventListener('click', () => {
+    const v = document.getElementById('diagUrl').value.trim();
+    if (v) runLookupDiagnostics(v);
+  });
   // ── Nav ───────────────────────────────────────────────────────────────────
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => switchView(btn.dataset.view));
