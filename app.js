@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v75'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v76'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -104,7 +104,6 @@ function moveAlbumToFront(id) {
 // for every album regardless of how well-documented it is (confirmed by direct
 // testing), so label lookups go through MusicBrainz instead — see backfillLabels().
 async function backfillYears() {
-  if (isRateLimited()) return; // respect persisted rate-limit window
   const needsData = albums.filter(a =>
     a.spotifyUrl &&
     !a.spotifyUrl.includes('/prerelease/') &&
@@ -113,40 +112,54 @@ async function backfillYears() {
   if (!needsData.length) return;
   let changed = false;
   for (const a of needsData) {
-    if (isRateLimited()) break; // stop mid-loop if we hit the limit
-    await new Promise(r => setTimeout(r, 300)); // pace requests — avoid 429
-    try {
-      const id = extractAlbumId(a.spotifyUrl);
-      if (!id) continue;
-      const token = await getSpotifyToken();
-      const res = await fetch(`https://api.spotify.com/v1/albums/${id}`, {
-        headers: { 'Authorization': 'Bearer ' + token },
-      });
-      if (!res.ok) {
+    let viaApi = false;
+    if (!isRateLimited()) { // respect persisted rate-limit window
+      await new Promise(r => setTimeout(r, 300)); // pace requests — avoid 429
+      try {
+        const id = extractAlbumId(a.spotifyUrl);
+        if (!id) continue;
+        const token = await getSpotifyToken();
+        const res = await fetch(`https://api.spotify.com/v1/albums/${id}`, {
+          headers: { 'Authorization': 'Bearer ' + token },
+        });
         if (res.status === 429) {
           const retryAfter = parseInt(res.headers.get('retry-after') || '7200', 10);
           setRateLimit(Date.now() + retryAfter * 1000);
-          break; // must stop on rate limit
+        } else if (res.ok) {
+          viaApi = true;
+          if (await applyCatalogBackfill(a, await res.json())) changed = true;
         }
-        continue; // 404 / other error — skip this album, keep going
+      } catch (err) {
+        console.warn('[LPQ] backfillYears API lookup failed for', a.title, err);
       }
-      const d = await res.json();
-      // A reissue/pre-save can already have a catalog entry whose release_date
-      // is the ORIGINAL recording, not the upcoming release — see
-      // scrapeCountdownDate() above for why the per-track restriction is the
-      // tell and where the true date actually lives.
-      let releaseDate = d.release_date ?? null;
-      if (releaseDate && d.tracks?.items?.some(t => t.restrictions?.reason === 'market')) {
-        releaseDate = (await scrapeCountdownDate(d.external_urls.spotify)) ?? releaseDate;
-      }
-      if (releaseDate && !a.year)          { a.year = releaseDate.slice(0, 4); changed = true; }
-      if (releaseDate && !a.releaseDate)   { a.releaseDate = releaseDate;      changed = true; }
-      if (d.artists?.length && !a.artist)  { a.artist = d.artists.map(x => x.name).join(', '); changed = true; }
-    } catch (err) {
-      console.warn('[LPQ] backfillYears failed for', a.title, err);
+    }
+    // API unavailable (rate-limited / blocked / 404) — the rendered page still
+    // has the artist and countdown date, so repair from that instead.
+    if (!viaApi && (!a.releaseDate || !a.artist)) {
+      const page = await scrapeAlbumPage(a.spotifyUrl.split('?')[0]);
+      if (page?.releaseDate && !a.releaseDate) { a.releaseDate = page.releaseDate; a.year = a.year || page.releaseDate.slice(0, 4); changed = true; }
+      if (page?.artist && !a.artist)           { a.artist = page.artist; changed = true; }
     }
   }
   if (changed) { save(); render(); }
+}
+
+// Fill any missing year/date/artist on `a` from a catalog API album response.
+// Returns true if anything changed.
+async function applyCatalogBackfill(a, d) {
+  let changed = false;
+  // A reissue/pre-save can already have a catalog entry whose release_date
+  // is the ORIGINAL recording, not the upcoming release — see
+  // scrapeAlbumPage() below for why the per-track restriction is the
+  // tell and where the true date actually lives.
+  let releaseDate = d.release_date ?? null;
+  if (releaseDate && d.tracks?.items?.some(t => t.restrictions?.reason === 'market')) {
+    releaseDate = (await scrapeCountdownDate(d.external_urls.spotify)) ?? releaseDate;
+  }
+  if (releaseDate && !a.year)          { a.year = releaseDate.slice(0, 4); changed = true; }
+  if (releaseDate && !a.releaseDate)   { a.releaseDate = releaseDate;      changed = true; }
+  if (d.artists?.length && !a.artist)  { a.artist = d.artists.map(x => x.name).join(', '); changed = true; }
+  return changed;
 }
 
 // ─── MusicBrainz (record label lookup) ─────────────────────────────────────────
@@ -295,28 +308,41 @@ function extractAlbumId(url) {
 // that's set, the true date only exists in Spotify's rendered page copy
 // ("Releases on <Month D, YYYY>") — resolved the same way as /prerelease/
 // pages, via r.jina.ai (see fetchPreReleaseMeta below).
-async function scrapeCountdownDate(albumUrl) {
+//
+// scrapeAlbumPage() also doubles as the fallback when the catalog API itself
+// is unreachable (rate-limited, blocked, token failure): the page title carries
+// the artist ("<Title> - Upcoming Album by <Artist>") and the countdown carries
+// the date, so neither depends on Spotify's Web API.
+async function scrapeAlbumPage(albumUrl) {
   const t = () => AbortSignal.timeout(6000);
   const attempts = [
     async () => (await fetch(albumUrl, { signal: t() })).text(),
     async () => (await fetch('https://r.jina.ai/' + albumUrl, { signal: t() })).text(),
   ];
-  const pattern = /Releases on ([A-Za-z]+ \d{1,2}, \d{4})/;
   for (const attempt of attempts) {
     try {
       const text = await attempt();
-      const m = text?.match(pattern);
-      if (m) {
-        const parsed = new Date(m[1]);
+      if (!text) continue;
+      let releaseDate = null;
+      const dm = text.match(/Releases on ([A-Za-z]+ \d{1,2}, \d{4})/);
+      if (dm) {
+        const parsed = new Date(dm[1]);
         if (!isNaN(parsed)) {
-          return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+          releaseDate = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
         }
       }
+      const am = text.match(/^Title: .+? - (?:Upcoming )?(?:Album|Single|EP|Compilation) by (.+?)(?: \| Spotify)?\s*$/m);
+      const artist = am ? am[1].trim() : null;
+      if (releaseDate || artist) return { releaseDate, artist };
     } catch (err) {
-      console.log('[LPQ] countdown scrape attempt failed:', err?.message || err);
+      console.log('[LPQ] album page scrape attempt failed:', err?.message || err);
     }
   }
   return null;
+}
+
+async function scrapeCountdownDate(albumUrl) {
+  return (await scrapeAlbumPage(albumUrl))?.releaseDate ?? null;
 }
 
 // Turn a catalog API album response into the shape fetchSpotifyAlbum returns,
@@ -384,7 +410,10 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
       const d = await res.json();
       return await catalogToResult(d);
     }
-  } catch {}
+    console.warn('[LPQ] catalog lookup failed:', res.status, albumId);
+  } catch (err) {
+    console.warn('[LPQ] catalog lookup error:', err?.message || err);
+  }
 
   // Fall back to oEmbed — works for pre-releases not yet in the catalog
   const oe = await fetch(
@@ -416,16 +445,21 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
     console.log('[LPQ] no embed ID found in oEmbed html');
   }
 
-  // Genuine fallback — album truly not in catalog yet
+  // Catalog unreachable or album not in it yet — read artist/date off the
+  // rendered album page instead of leaving them blank.
+  const cleanUrl = rawUrl.split('?')[0];
+  const page = await scrapeAlbumPage(cleanUrl);
+  const artist = d.author_name || page?.artist || '';
+  const releaseDate = page?.releaseDate ?? null;
   return {
     title:         d.title,
-    artist:        d.author_name || '',
+    artist,
     art:           d.thumbnail_url ?? null,
-    spotifyUrl:    rawUrl.split('?')[0],
-    year:          null,
-    releaseDate:   null,
+    spotifyUrl:    cleanUrl,
+    year:          releaseDate ? releaseDate.slice(0, 4) : null,
+    releaseDate,
     label:         null,
-    partialLookup: true, // flag: only title+art retrieved; artist/date need manual entry
+    partialLookup: !(artist && releaseDate), // flag: artist/date may need manual entry
   };
 }
 
