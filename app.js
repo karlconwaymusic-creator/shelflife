@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v77'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v78'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -689,6 +689,14 @@ function handleShareTarget() {
   const params = new URLSearchParams(window.location.search);
   if (params.has('url') || params.has('text') || params.has('title')) {
     const sharedUrl = extractSharedSpotifyUrl(params);
+    // Kept for Settings → Lookup Diagnostics: what Spotify actually sent.
+    try {
+      localStorage.setItem('lpq-last-share', JSON.stringify({
+        at: new Date().toISOString(),
+        params: Object.fromEntries(params),
+        extracted: sharedUrl,
+      }));
+    } catch {}
     window.history.replaceState(null, '', window.location.pathname); // no re-add on refresh
     if (!sharedUrl) { showToast('No Spotify album link found in that share'); return; }
     sessionStorage.setItem('lpq-share', JSON.stringify({ url: sharedUrl, at: Date.now() }));
@@ -743,6 +751,11 @@ async function processPendingShare() {
     return;
   }
   done();
+  try {
+    const last = JSON.parse(localStorage.getItem('lpq-last-share') || '{}');
+    last.result = { title: data.title, artist: data.artist, releaseDate: data.releaseDate, partialLookup: !!data.partialLookup, spotifyUrl: data.spotifyUrl };
+    localStorage.setItem('lpq-last-share', JSON.stringify(last));
+  } catch {}
 
   const isPre = isPreRelease(data.releaseDate, data.spotifyUrl);
   // Shelf-full only blocks shelf adds — pre-releases don't occupy shelf slots.
@@ -1269,6 +1282,10 @@ async function runLookupDiagnostics(rawUrl) {
 }
 
 function bindEvents() {
+  try {
+    const last = localStorage.getItem('lpq-last-share');
+    if (last) document.getElementById('diagOut').textContent = 'Last share received:\n' + JSON.stringify(JSON.parse(last), null, 1);
+  } catch {}
   document.getElementById('diagRun').addEventListener('click', () => {
     const v = document.getElementById('diagUrl').value.trim();
     if (v) runLookupDiagnostics(v);
