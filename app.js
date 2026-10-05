@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v78'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v79'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -505,7 +505,13 @@ async function fetchPreReleaseMeta(prereleaseUrl) {
       console.log('[LPQ] prerelease resolve attempt failed:', err?.message || err);
     }
   }
-  if (!catalogId) return null;
+  if (!catalogId) {
+    // Spotify's embed page no longer links to the catalog album for some
+    // pre-releases (its "Play on Spotify" link points back at /prerelease/),
+    // but the /prerelease/ page itself still carries the artist and countdown.
+    const page = await scrapeAlbumPage('https://open.spotify.com/prerelease/' + id);
+    return page ? { title: null, artist: page.artist, releaseDate: page.releaseDate, art: null } : null;
+  }
 
   // Full, accurate metadata straight from Spotify's own catalog API. Its
   // release_date is a plain YYYY-MM-DD, unlike the embed page's ambiguous
