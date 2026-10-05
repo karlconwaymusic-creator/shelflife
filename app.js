@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v79'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v80'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -1285,13 +1285,13 @@ async function runLookupDiagnostics(rawUrl) {
     const r = await fetchSpotifyAlbum(id, url);
     return `${r.title} | ${r.artist || '(no artist)'} | ${r.releaseDate || '(no date)'}`;
   });
+  try {
+    const last = localStorage.getItem('lpq-last-share');
+    if (last) log('Last share received:\n' + JSON.stringify(JSON.parse(last), null, 1));
+  } catch {}
 }
 
 function bindEvents() {
-  try {
-    const last = localStorage.getItem('lpq-last-share');
-    if (last) document.getElementById('diagOut').textContent = 'Last share received:\n' + JSON.stringify(JSON.parse(last), null, 1);
-  } catch {}
   document.getElementById('diagRun').addEventListener('click', () => {
     const v = document.getElementById('diagUrl').value.trim();
     if (v) runLookupDiagnostics(v);
