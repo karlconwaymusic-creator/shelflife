@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v80'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v81'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -118,10 +118,7 @@ async function backfillYears() {
       try {
         const id = extractAlbumId(a.spotifyUrl);
         if (!id) continue;
-        const token = await getSpotifyToken();
-        const res = await fetch(`https://api.spotify.com/v1/albums/${id}`, {
-          headers: { 'Authorization': 'Bearer ' + token },
-        });
+        const res = await fetch(`${SPOTIFY_PROXY}/album/${id}`);
         if (res.status === 429) {
           const retryAfter = parseInt(res.headers.get('retry-after') || '7200', 10);
           setRateLimit(Date.now() + retryAfter * 1000);
@@ -268,27 +265,10 @@ function applySettingsUI() {
 }
 
 // ─── Spotify ──────────────────────────────────────────────────────────────────
-const SP_ID     = '1978c65fadff4963ab3373a4f4be8afb';
-const SP_SECRET = '8b15acf967734155a7b658740551554d';
-let spToken  = null;
-let spExpiry = 0;
-
-async function getSpotifyToken() {
-  if (spToken && Date.now() < spExpiry) return spToken;
-  const res = await fetch('https://accounts.spotify.com/api/token', {
-    method: 'POST',
-    headers: {
-      'Authorization': 'Basic ' + btoa(SP_ID + ':' + SP_SECRET),
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: 'grant_type=client_credentials',
-  });
-  if (!res.ok) throw new Error('Auth failed');
-  const data = await res.json();
-  spToken  = data.access_token;
-  spExpiry = Date.now() + (data.expires_in - 60) * 1000;
-  return spToken;
-}
+// Spotify catalog calls go through the lpq-spotify Cloudflare Worker, which
+// holds the client credentials. Same response bodies/status codes as Spotify's
+// GET /v1/albums/:id, so callers handle them exactly as before.
+const SPOTIFY_PROXY = 'https://lpq-spotify.karlconwaymusic.workers.dev';
 
 function extractAlbumId(url) {
   try {
@@ -402,10 +382,7 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
 
   // Try the catalog API first — gives high-res art and full metadata
   try {
-    const token = await getSpotifyToken();
-    const res = await fetch(`https://api.spotify.com/v1/albums/${albumId}`, {
-      headers: { 'Authorization': 'Bearer ' + token },
-    });
+    const res = await fetch(`${SPOTIFY_PROXY}/album/${albumId}`);
     if (res.ok) {
       const d = await res.json();
       return await catalogToResult(d);
@@ -428,10 +405,7 @@ async function fetchSpotifyAlbum(albumId, rawUrl) {
   const embedId = ((d.html || '').match(/open\.spotify\.com\/embed\/(?:album|prerelease)\/([A-Za-z0-9]+)/) || [])[1];
   if (embedId) {
     try {
-      const token = await getSpotifyToken();
-      const res2 = await fetch(`https://api.spotify.com/v1/albums/${embedId}`, {
-        headers: { 'Authorization': 'Bearer ' + token },
-      });
+      const res2 = await fetch(`${SPOTIFY_PROXY}/album/${embedId}`);
       if (res2.ok) {
         const cd = await res2.json();
         return await catalogToResult(cd);
@@ -517,11 +491,7 @@ async function fetchPreReleaseMeta(prereleaseUrl) {
   // release_date is a plain YYYY-MM-DD, unlike the embed page's ambiguous
   // vantage-dependent ISO instant — no timezone-anchoring math needed here.
   try {
-    const token = await getSpotifyToken();
-    const res = await fetch(`https://api.spotify.com/v1/albums/${catalogId}`, {
-      headers: { 'Authorization': 'Bearer ' + token },
-      signal: t(),
-    });
+    const res = await fetch(`${SPOTIFY_PROXY}/album/${catalogId}`, { signal: t() });
     if (!res.ok) return null;
     const d = await res.json();
     return {
@@ -1263,25 +1233,23 @@ async function runLookupDiagnostics(rawUrl) {
   log(`${APP_VERSION} | online=${navigator.onLine} | AbortSignal.timeout=${typeof AbortSignal?.timeout} | rateLimitedUntil=${getRateLimit() || 'none'}`);
   if (!id) { log('No album id found in that link'); return; }
   const url = 'https://open.spotify.com/album/' + id;
-  let token = null;
-  await step('1 token', async () => { token = await getSpotifyToken(); return 'ok'; });
-  await step('2 catalog', async () => {
-    const r = await fetch('https://api.spotify.com/v1/albums/' + id, { headers: { Authorization: 'Bearer ' + token } });
+  await step('1 catalog (via proxy)', async () => {
+    const r = await fetch(`${SPOTIFY_PROXY}/album/${id}`);
     if (!r.ok) return 'HTTP ' + r.status + ' retry-after=' + r.headers.get('retry-after');
     const d = await r.json();
     return `${d.name} | ${d.release_date} | restricted=${!!d.tracks?.items?.some(t => t.restrictions?.reason === 'market')}`;
   });
-  await step('3 oembed', async () => {
+  await step('2 oembed', async () => {
     const r = await fetch('https://open.spotify.com/oembed?url=' + encodeURIComponent(url));
     return r.ok ? (await r.json()).title : 'HTTP ' + r.status;
   });
-  await step('4 page-read', async () => {
+  await step('3 page-read', async () => {
     const r = await fetch('https://r.jina.ai/' + url, { signal: AbortSignal.timeout(8000) });
     if (!r.ok) return 'HTTP ' + r.status;
     const text = await r.text();
     return `${text.length} chars | releases=${(text.match(/Releases on [^\n]*/) || ['none'])[0]} | title=${(text.match(/^Title: .*$/m) || ['none'])[0]}`;
   });
-  await step('5 full lookup', async () => {
+  await step('4 full lookup', async () => {
     const r = await fetchSpotifyAlbum(id, url);
     return `${r.title} | ${r.artist || '(no artist)'} | ${r.releaseDate || '(no date)'}`;
   });

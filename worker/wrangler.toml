@@ -1,0 +1,10 @@
+# LPQ-only Worker. Name, secrets and config are separate from any other project.
+# Secrets (never put these here):  SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
+name = "lpq-spotify"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[vars]
+# Comma-separated list of origins allowed to call this Worker.
+ALLOWED_ORIGINS = "https://karlconwaymusic-creator.github.io"
