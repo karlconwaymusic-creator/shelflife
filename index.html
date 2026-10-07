@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="styles.css?v=81">
+  <link rel="stylesheet" href="styles.css?v=82">
   <!-- SW bootstrap — inline so it runs from the always-fresh index.html,
        not from potentially-stale cached app.js -->
   <script>
@@ -345,6 +345,37 @@
 
       <form id="albumForm" novalidate>
 
+        <!-- Search (default) -->
+        <div id="searchPane">
+          <div class="field-group">
+            <label class="label" for="searchInput">Search Spotify</label>
+            <input type="search" id="searchInput" class="input" placeholder="Album or artist" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-describedby="searchHint">
+            <div id="searchHint" class="search-hint">Type at least 3 characters to search albums and EPs.</div>
+          </div>
+
+          <div id="searchStatus" class="search-status" role="status" aria-live="polite">
+            <svg id="searchSpinner" class="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true" hidden>
+              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+            </svg>
+            <span id="searchStatusText"></span>
+            <button type="button" id="searchRetry" class="search-retry" hidden>Try again</button>
+          </div>
+
+          <div id="searchResults" class="search-results" role="radiogroup" aria-label="Search results" hidden></div>
+
+          <div id="preOffer" class="pre-offer" hidden>
+            <div id="preOfferText" class="pre-offer__text"></div>
+            <button type="button" id="preOfferBtn" class="pre-offer__btn" aria-pressed="false">Add to Pre-Releases instead</button>
+          </div>
+
+          <p id="searchPreNote" class="search-prenote" hidden>Can't find it? Search often misses albums that aren't out yet.</p>
+          <button type="button" id="gotoLink" class="search-link-btn">Paste a link instead</button>
+        </div>
+
+        <!-- Paste a link (secondary) -->
+        <div id="linkPane" hidden>
+        <button type="button" id="gotoSearch" class="search-link-btn search-link-btn--back">&larr; Search instead</button>
+
         <div class="field-group">
           <label class="label" for="spotifyInput">Spotify Album URL</label>
           <input type="url" id="spotifyInput" class="input" placeholder="https://open.spotify.com/album/…" autocomplete="off" inputmode="url" autocorrect="off" spellcheck="false">
@@ -376,6 +407,7 @@
           <label class="label" for="releaseDateInput">Release date <span class="opt">(optional)</span></label>
           <input type="date" id="releaseDateInput" class="input">
         </div>
+        </div>
 
         <button type="submit" id="submitBtn" class="submit-btn" disabled>Add to Shelf</button>
 
@@ -383,6 +415,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=81"></script>
+  <script src="app.js?v=82"></script>
 </body>
 </html>

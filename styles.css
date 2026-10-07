@@ -906,3 +906,204 @@ main { padding: 0; }
 .submit-btn:hover  { background: var(--accent-hi); }
 .submit-btn:active { transform: scale(0.97); }
 
+
+
+/* ─── Add flow: Spotify search ────────────────────────────────────────────── */
+.search-hint {
+  font-size: 0.78rem;
+  color: var(--text2);
+  margin-top: 2px;
+}
+
+.search-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text2);
+  font-size: 0.88rem;
+}
+.search-status > [hidden],
+#searchSpinner[hidden] { display: none !important; }
+.search-status > :not([hidden]) { margin-top: 12px; }
+.search-status.is-error #searchStatusText { color: rgb(255,69,58); }
+
+.search-retry {
+  min-height: 44px;
+  padding: 0 14px;
+  background: var(--surface2);
+  color: var(--text);
+  border: none;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Results — same hierarchy as the Get Physical rows (square art, title, artist,
+   year), scaled to fit a sheet. */
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  max-height: min(34dvh, 280px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.search-results[hidden] { display: none !important; }
+.search-results[aria-busy="true"] { opacity: 0.55; }
+
+.search-row {
+  display: block;
+  position: relative;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.search-row__body {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 64px;
+  padding: 6px 10px 6px 6px;
+  border: 1.5px solid transparent;
+  border-radius: 12px;
+  transition: background 0.12s, border-color 0.12s;
+}
+.search-row:hover .search-row__body { background: rgba(255,255,255,0.04); }
+.search-row__radio:checked + .search-row__body {
+  background: rgba(29,185,84,0.12);
+  border-color: var(--accent);
+}
+.search-row__radio:focus-visible + .search-row__body {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+.search-row__radio:disabled + .search-row__body { opacity: 0.6; }
+.search-row:has(.search-row__radio:disabled) { cursor: default; }
+
+.search-row__art {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--surface2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text2);
+  font-size: 1.4rem;
+}
+.search-row__art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.search-row__meta { flex: 1; min-width: 0; }
+.search-row__title {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.search-row__artist {
+  font-size: 0.86rem;
+  color: var(--text2);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.search-row__year {
+  font-size: 0.8rem;
+  color: var(--text2);
+  margin-top: 3px;
+}
+.search-row__year--soon { color: var(--accent); font-weight: 600; }
+
+.search-row__added {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* Offer to redirect a not-yet-released pick */
+.pre-offer {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: var(--surface2);
+  border-radius: var(--radius);
+}
+.pre-offer[hidden] { display: none !important; }
+.pre-offer__text { font-size: 0.86rem; color: var(--text2); line-height: 1.4; }
+.pre-offer__btn {
+  margin-top: 10px;
+  min-height: 44px;
+  padding: 0 14px;
+  background: transparent;
+  color: var(--accent);
+  border: 1.5px solid var(--accent);
+  border-radius: 10px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.pre-offer__btn[aria-pressed="true"] { background: var(--accent); color: #000; }
+
+/* "Paste a link instead" — quiet by default, prominent where search is weakest */
+.search-prenote {
+  margin-top: 14px;
+  font-size: 0.86rem;
+  color: var(--text2);
+  line-height: 1.4;
+}
+.search-prenote[hidden] { display: none !important; }
+
+.search-link-btn {
+  display: block;
+  min-height: 44px;
+  margin-top: 6px;
+  padding: 0 4px;
+  background: none;
+  border: none;
+  color: var(--text2);
+  font-size: 0.88rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.search-link-btn:hover { color: var(--text); }
+.search-link-btn.is-prominent,
+.search-link-btn.is-emphasised {
+  width: 100%;
+  margin-top: 10px;
+  padding: 0 14px;
+  border: 1.5px solid var(--accent);
+  border-radius: 12px;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.search-link-btn.is-prominent { background: rgba(29,185,84,0.1); }
+.search-link-btn--back { margin: -4px 0 6px; }
+
+/* Larger hit area for the existing close button without changing its look */
+#closeModal { position: relative; }
+#closeModal::before { content: ''; position: absolute; inset: -6px; }
+
+/* Keep the Add button reachable when search results make the sheet scroll.
+   Identical to before when everything fits. */
+.modal-sheet .submit-btn {
+  position: sticky;
+  bottom: 0;
+  box-shadow: 0 0 0 12px #1c1c1e;
+}
