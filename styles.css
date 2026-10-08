@@ -689,6 +689,11 @@ main { padding: 0; }
   color: var(--text2);
 }
 
+/* `display:flex` on these beats the hidden attribute, so without this the
+   loading line and an empty preview card showed even when hidden. */
+.fetch-status[hidden],
+.album-preview[hidden] { display: none !important; }
+
 .album-preview {
   display: flex;
   align-items: center;
@@ -1057,44 +1062,17 @@ main { padding: 0; }
 }
 .pre-offer__btn[aria-pressed="true"] { background: var(--accent); color: #000; }
 
-/* "Paste a link instead" — quiet by default, prominent where search is weakest */
+/* Pre-Releases note: search is weakest there, so point at the paste option. */
 .search-prenote {
   margin-top: 14px;
-  font-size: 0.86rem;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border-radius: var(--radius);
+  font-size: 0.84rem;
   color: var(--text2);
   line-height: 1.4;
 }
 .search-prenote[hidden] { display: none !important; }
-
-.search-link-btn {
-  display: block;
-  min-height: 44px;
-  margin-top: 6px;
-  padding: 0 4px;
-  background: none;
-  border: none;
-  color: var(--text2);
-  font-size: 0.88rem;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-}
-.search-link-btn:hover { color: var(--text); }
-.search-link-btn.is-prominent,
-.search-link-btn.is-emphasised {
-  width: 100%;
-  margin-top: 10px;
-  padding: 0 14px;
-  border: 1.5px solid var(--accent);
-  border-radius: 12px;
-  color: var(--accent);
-  font-weight: 600;
-  text-decoration: none;
-}
-.search-link-btn.is-prominent { background: rgba(29,185,84,0.1); }
-.search-link-btn--back { margin: -4px 0 6px; }
 
 /* Larger hit area for the existing close button without changing its look */
 #closeModal { position: relative; }

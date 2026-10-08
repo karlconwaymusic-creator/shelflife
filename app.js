@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v82'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v83'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -12,7 +12,7 @@ let redirectToPre = false; // search flow: user chose "Add to Pre-Releases inste
 const SEARCH_MIN_CHARS   = 3;
 const SEARCH_DEBOUNCE_MS = 350;
 const SEARCH_PAGE_SIZE   = 10;   // Spotify rejects larger limits
-let addMode      = 'search';     // 'search' | 'link'
+let linkTimer    = null;         // debounce for a pasted-link lookup
 let searchSeq    = 0;            // invalidates searches still in flight
 let selectSeq    = 0;            // invalidates a pick still being resolved
 let searchTimer  = null;
@@ -563,7 +563,6 @@ const $overlay       = document.getElementById('overlay');
 const $addBtn        = document.getElementById('addBtn');
 const $closeBtn      = document.getElementById('closeModal');
 const $form          = document.getElementById('albumForm');
-const $spotifyInput  = document.getElementById('spotifyInput');
 const $fetchLoading  = document.getElementById('fetchLoading');
 const $fetchError    = document.getElementById('fetchError');
 const $albumPreview  = document.getElementById('albumPreview');
@@ -575,8 +574,6 @@ const $artistInput        = document.getElementById('artistInput');
 const $releaseDateField   = document.getElementById('releaseDateField');
 const $releaseDateInput   = document.getElementById('releaseDateInput');
 const $submitBtn     = document.getElementById('submitBtn');
-const $searchPane    = document.getElementById('searchPane');
-const $linkPane      = document.getElementById('linkPane');
 const $searchInput   = document.getElementById('searchInput');
 const $searchHint    = document.getElementById('searchHint');
 const $searchStatus  = document.getElementById('searchStatus');
@@ -588,8 +585,6 @@ const $preOffer      = document.getElementById('preOffer');
 const $preOfferText  = document.getElementById('preOfferText');
 const $preOfferBtn   = document.getElementById('preOfferBtn');
 const $searchPreNote = document.getElementById('searchPreNote');
-const $gotoLink      = document.getElementById('gotoLink');
-const $gotoSearch    = document.getElementById('gotoSearch');
 const $settingArchive   = document.getElementById('settingArchive');
 const $settingShelfSize = document.getElementById('settingShelfSize');
 const $shelfSizeVal     = document.getElementById('shelfSizeVal');
@@ -1493,83 +1488,6 @@ function bindEvents() {
   $settingFormatVinyl.addEventListener('click', () => setPreferredFormat('Vinyl'));
   $settingFormatCD.addEventListener('click', () => setPreferredFormat('CD'));
 
-  // ── Spotify URL input ─────────────────────────────────────────────────────
-  let lookupTimer;
-  $spotifyInput.addEventListener('input', () => {
-    clearTimeout(lookupTimer);
-    const seq = ++lookupSeq; // invalidates any lookup still in flight
-    fetchedAlbum = null;
-    $submitBtn.disabled = true;
-    $albumPreview.hidden = true;
-    $previewArt.removeAttribute('src'); // don't let the previous album's art flash
-    $artistInput.value      = '';       // …nor its artist/date linger in the manual fields
-    $releaseDateInput.value = '';
-    $fetchError.hidden = true;
-    $fetchLoading.hidden = true;
-
-    const rawUrl  = $spotifyInput.value.trim();
-    const albumId = extractAlbumId(rawUrl);
-    if (!albumId) return;
-
-    $fetchLoading.hidden = false;
-    lookupTimer = setTimeout(async () => {
-      try {
-        const data = await fetchSpotifyAlbum(albumId, rawUrl);
-        if (seq !== lookupSeq) return; // stale — user typed a new URL or closed the modal
-        fetchedAlbum = {
-          title:       data.title,
-          artist:      data.artist,
-          art:         data.art,
-          spotifyUrl:  data.spotifyUrl,
-          year:        data.year,
-          releaseDate: data.releaseDate ?? null,
-          label:       data.label ?? null,
-        };
-        if (fetchedAlbum.art) $previewArt.src = fetchedAlbum.art;
-        else $previewArt.removeAttribute('src');
-        $previewArt.hidden = !fetchedAlbum.art;
-        $previewTitle.textContent  = fetchedAlbum.title;
-        const isVinyl = currentView === 'vinyl';
-        // If opened from the Pre-Releases tab, always treat as pre-release —
-        // oEmbed albums without a /prerelease/ URL or release date won't auto-detect.
-        const isPre = !isVinyl && (isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl) || currentView === 'prerelease');
-        const hasMeta = isPre && fetchedAlbum.releaseDate;
-        $previewArtist.textContent = (fetchedAlbum.artist || '') +
-          (hasMeta ? `${fetchedAlbum.artist ? ' · ' : ''}Out ${formatReleaseDate(fetchedAlbum.releaseDate)}`
-                   : (fetchedAlbum.year ? `${fetchedAlbum.artist ? ' · ' : ''}${fetchedAlbum.year}` : ''));
-        // Manual artist field only needed for pre-releases (oEmbed omits artist name).
-        // Use style.display so it beats any CSS class rule (e.g. .field-group { display:flex }).
-        const showArtist = currentView === 'prerelease';
-        $artistField.classList.toggle('visible', showArtist);
-        $releaseDateField.classList.toggle('visible', showArtist);
-        if (showArtist) {
-          // Pre-fill whatever we got from oEmbed; blank if nothing
-          $artistInput.value      = fetchedAlbum.artist || '';
-          $releaseDateInput.value = fetchedAlbum.releaseDate || '';
-        }
-        // If this was a /prerelease/ URL that couldn't be resolved to catalog data,
-        // show a clear notice so the user knows to fill in the missing fields
-        if (data.partialLookup && rawUrl.includes('/prerelease/')) {
-          $fetchError.textContent = 'Pre-release link — title and artwork fetched. Please fill in the artist and release date below.';
-          $fetchError.classList.add('fetch-error--info');
-          $fetchError.hidden = false;
-        } else {
-          $fetchError.classList.remove('fetch-error--info');
-          $fetchError.hidden = true;
-        }
-        $fetchLoading.hidden  = true;
-        $albumPreview.hidden  = false;
-        $submitBtn.disabled   = false;
-        $submitBtn.textContent = isVinyl ? 'Add to Get Physical' : isPre ? 'Add to Pre-Releases' : 'Add to Shelf';
-      } catch {
-        if (seq !== lookupSeq) return; // stale failure — don't flash an error for it
-        $fetchLoading.hidden  = true;
-        $fetchError.textContent = 'Couldn\'t find that album — check the URL and try again.';
-        $fetchError.hidden    = false;
-      }
-    }, 400);
-  });
-
   // ── Form submit ───────────────────────────────────────────────────────────
   $form.addEventListener('submit', onSubmit);
 }
@@ -1647,13 +1565,94 @@ function setSearchStatus(text, { loading = false, error = false, retry = false }
   $searchStatus.classList.toggle('is-error', error);
 }
 
-// The paste-a-link button is quiet by default, bold when search has let us
-// down (no results / error) and on Pre-Releases, where search is weakest.
-function updateLinkPrompt(emphasise) {
+// On Pre-Releases, where search is weakest, keep a note pointing at the paste
+// option in the same box. Hidden while a pasted link is being shown.
+function updatePreNote(linkActive) {
+  $searchPreNote.hidden = linkActive || currentView !== 'prerelease';
+}
+
+// The box holds a Spotify album/pre-release link rather than a search.
+const SPOTIFY_LINK_RE = /https?:\/\/open\.spotify\.com\/(?:intl-[a-z]+\/)?(?:album|prerelease)\/[A-Za-z0-9]+[^\s]*/i;
+
+// Wipe everything the pasted-link path shows or has fetched.
+function clearLinkUI() {
+  clearTimeout(linkTimer);
+  lookupSeq++; // invalidates any lookup still in flight
+  $albumPreview.hidden = true;
+  $previewArt.removeAttribute('src'); // don't let the previous album's art flash
+  $previewArt.hidden = true;
+  $previewTitle.textContent = '';
+  $previewArtist.textContent = '';
+  $artistInput.value = '';            // …nor its artist/date linger in the manual fields
+  $releaseDateInput.value = '';
+  $artistField.classList.remove('visible');
+  $releaseDateField.classList.remove('visible');
+  $fetchError.classList.remove('fetch-error--info');
+  $fetchError.hidden = true;
+  $fetchLoading.hidden = true;
+}
+
+// A pasted Spotify link: look it up and preview it in place of search results.
+function startLinkLookup(rawUrl, delay = 400) {
+  const albumId = extractAlbumId(rawUrl);
+  const seq = lookupSeq;
+  if (!albumId) return;
+  // Pre-releases often come back without artist/date, so on that tab the manual fields appear straight away.
   const onPre = currentView === 'prerelease';
-  $searchPreNote.hidden = !onPre;
-  $gotoLink.classList.toggle('is-prominent', onPre);
-  $gotoLink.classList.toggle('is-emphasised', !onPre && !!emphasise);
+  $artistField.classList.toggle('visible', onPre);
+  $releaseDateField.classList.toggle('visible', onPre);
+  $fetchLoading.hidden = false;
+  linkTimer = setTimeout(async () => {
+    try {
+      const data = await fetchSpotifyAlbum(albumId, rawUrl);
+      if (seq !== lookupSeq) return; // stale — user typed something else or closed the modal
+      fetchedAlbum = {
+        title:       data.title,
+        artist:      data.artist,
+        art:         data.art,
+        spotifyUrl:  data.spotifyUrl,
+        year:        data.year,
+        releaseDate: data.releaseDate ?? null,
+        label:       data.label ?? null,
+      };
+      if (fetchedAlbum.art) $previewArt.src = fetchedAlbum.art;
+      else $previewArt.removeAttribute('src');
+      $previewArt.hidden = !fetchedAlbum.art;
+      $previewTitle.textContent = fetchedAlbum.title;
+      const isVinyl = currentView === 'vinyl';
+      // If opened from the Pre-Releases tab, always treat as pre-release —
+      // oEmbed albums without a /prerelease/ URL or release date won't auto-detect.
+      const isPre = !isVinyl && (isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl) || currentView === 'prerelease');
+      const hasMeta = isPre && fetchedAlbum.releaseDate;
+      $previewArtist.textContent = (fetchedAlbum.artist || '') +
+        (hasMeta ? `${fetchedAlbum.artist ? ' · ' : ''}Out ${formatReleaseDate(fetchedAlbum.releaseDate)}`
+                 : (fetchedAlbum.year ? `${fetchedAlbum.artist ? ' · ' : ''}${fetchedAlbum.year}` : ''));
+      if (onPre) {
+        // Pre-fill whatever we got; blank if nothing
+        $artistInput.value      = fetchedAlbum.artist || '';
+        $releaseDateInput.value = fetchedAlbum.releaseDate || '';
+      }
+      // If this was a /prerelease/ URL that couldn't be resolved to catalog data,
+      // show a clear notice so the user knows to fill in the missing fields
+      if (data.partialLookup && rawUrl.includes('/prerelease/')) {
+        $fetchError.textContent = 'Pre-release link — title and artwork fetched. Please fill in the artist and release date below.';
+        $fetchError.classList.add('fetch-error--info');
+        $fetchError.hidden = false;
+      } else {
+        $fetchError.classList.remove('fetch-error--info');
+        $fetchError.hidden = true;
+      }
+      $fetchLoading.hidden = true;
+      $albumPreview.hidden = false;
+      $submitBtn.disabled  = false;
+      refreshSearchSelectionUI(); // button label + "not out yet" note, same as a search pick
+    } catch {
+      if (seq !== lookupSeq) return; // stale failure — don't flash an error for it
+      $fetchLoading.hidden = true;
+      $fetchError.textContent = 'Couldn\'t find that album — check the link and try again.';
+      $fetchError.hidden = false;
+    }
+  }, delay);
 }
 
 function clearSearchSelection() {
@@ -1691,27 +1690,48 @@ function resetSearchUI() {
   $preOfferBtn.setAttribute('aria-pressed', 'false');
   $searchHint.hidden = false;
   setSearchStatus('');
-  updateLinkPrompt(false);
+  clearLinkUI();
+  updatePreNote(false);
 }
 
+// The one input: a Spotify link is looked up, anything else is searched.
 function onSearchInput() {
   clearTimeout(searchTimer);
   searchAbort?.abort();
   const seq = ++searchSeq;
   clearSearchSelection();
-  const q = $searchInput.value.trim();
-  if (q.length < SEARCH_MIN_CHARS) {
+  clearLinkUI();
+  const raw = $searchInput.value.trim();
+  const link = raw.match(SPOTIFY_LINK_RE);
+
+  if (link || /^https?:\/\//i.test(raw)) {
+    // A link (or something that's clearly meant to be one) — never search for URL text.
+    searchShown = [];
+    $searchResults.replaceChildren();
+    $searchResults.hidden = true;
+    $searchHint.hidden = true;
+    setSearchStatus('');
+    updatePreNote(true);
+    if (link) startLinkLookup(link[0]);
+    else {
+      $fetchError.textContent = 'That doesn\'t look like a Spotify album link.';
+      $fetchError.hidden = false;
+    }
+    return;
+  }
+
+  updatePreNote(false);
+  if (raw.length < SEARCH_MIN_CHARS) {
     searchShown = [];
     $searchResults.replaceChildren();
     $searchResults.hidden = true;
     $searchHint.hidden = false;
     setSearchStatus('');
-    updateLinkPrompt(false);
     return;
   }
   $searchHint.hidden = true;
   if (!$searchResults.hidden) $searchResults.setAttribute('aria-busy', 'true');
-  searchTimer = setTimeout(() => runSearch(q, seq), SEARCH_DEBOUNCE_MS);
+  searchTimer = setTimeout(() => runSearch(raw, seq), SEARCH_DEBOUNCE_MS);
 }
 
 async function runSearch(q, seq) {
@@ -1730,11 +1750,10 @@ async function runSearch(q, seq) {
     $searchResults.replaceChildren();
     $searchResults.hidden = true;
     setSearchStatus(
-      err.status === 429 ? 'Spotify is busy right now — try again in a few seconds.'
-                         : 'Couldn\'t search Spotify. Check your connection and try again.',
+      err.status === 429 ? 'Spotify is busy right now — try again in a few seconds, or paste a Spotify link above.'
+                         : 'Couldn\'t search Spotify. Check your connection and try again, or paste a Spotify link above.',
       { error: true, retry: true }
     );
-    updateLinkPrompt(true);
   } finally {
     clearTimeout(timeout);
   }
@@ -1746,12 +1765,10 @@ function renderSearchResults(results, q) {
   $searchResults.replaceChildren();
   if (!results.length) {
     $searchResults.hidden = true;
-    setSearchStatus(`No albums or EPs found for “${q}”.`);
-    updateLinkPrompt(true);
+    setSearchStatus(`No albums or EPs found for “${q}”. You can also paste a Spotify link into the box above.`);
     return;
   }
   setSearchStatus(`${results.length} result${results.length === 1 ? '' : 's'}. Select one to add.`);
-  updateLinkPrompt(false);
 
   const today = localISODate();
   results.forEach((r, i) => {
@@ -1850,43 +1867,18 @@ function refreshSearchSelectionUI() {
   setAddButtonLabel();
   if (!fetchedAlbum) { $preOffer.hidden = true; return; }
   const notOut = isPreRelease(fetchedAlbum.releaseDate, fetchedAlbum.spotifyUrl);
-  const when = fetchedAlbum.releaseDate ? ` on ${formatReleaseDate(fetchedAlbum.releaseDate)}` : '';
+  const when = fetchedAlbum.releaseDate ? ` — it releases on ${formatReleaseDate(fetchedAlbum.releaseDate)}` : '';
   if (!notOut || currentView === 'prerelease') { $preOffer.hidden = true; return; }
   $preOffer.hidden = false;
   if (currentView === 'vinyl') {
-    $preOfferText.textContent = `This one isn't out yet — it releases${when}.`;
+    $preOfferText.textContent = `This one isn't out yet${when}.`;
     $preOfferBtn.hidden = false;
     $preOfferBtn.setAttribute('aria-pressed', String(redirectToPre));
   } else {
     // Shelf tab: existing rule already routes unreleased albums to Pre-Releases.
-    $preOfferText.textContent = `This one isn't out yet — it releases${when}, so it will be added to Pre-Releases.`;
+    $preOfferText.textContent = `This one isn't out yet${when}, so it will be added to Pre-Releases.`;
     $preOfferBtn.hidden = true;
   }
-}
-
-// Switch between the search view and the paste-a-link view. Each starts clean
-// so state from one can never leak into the other's submit.
-function setAddMode(mode) {
-  addMode = mode;
-  lookupSeq++;
-  fetchedAlbum = null;
-  redirectToPre = false;
-  $submitBtn.disabled = true;
-  $fetchError.hidden = true;
-  $fetchLoading.hidden = true;
-  $albumPreview.hidden = true;
-  $spotifyInput.value = '';
-  $artistInput.value = '';
-  $releaseDateInput.value = '';
-  const onPre = mode === 'link' && currentView === 'prerelease';
-  // On Pre-Releases the artist/date fields are always shown in link mode (Spotify may omit them for unreleased albums)
-  $artistField.classList.toggle('visible', onPre);
-  $releaseDateField.classList.toggle('visible', onPre);
-  $searchPane.hidden = mode !== 'search';
-  $linkPane.hidden   = mode !== 'link';
-  if (mode === 'search') resetSearchUI(); else { clearTimeout(searchTimer); searchAbort?.abort(); searchSeq++; selectSeq++; }
-  setAddButtonLabel();
-  setTimeout(() => (mode === 'search' ? $searchInput : $spotifyInput).focus(), 30);
 }
 
 function bindSearchEvents() {
@@ -1895,7 +1887,13 @@ function bindSearchEvents() {
     if (e.key !== 'Enter') return;
     e.preventDefault(); // don't submit the form from the search box
     const q = $searchInput.value.trim();
-    if (q.length < SEARCH_MIN_CHARS) return;
+    const link = q.match(SPOTIFY_LINK_RE);
+    if (link) {                       // skip the debounce for a pasted link
+      clearTimeout(linkTimer);
+      if (!fetchedAlbum && $albumPreview.hidden) startLinkLookup(link[0], 0);
+      return;
+    }
+    if (/^https?:\/\//i.test(q) || q.length < SEARCH_MIN_CHARS) return;
     clearTimeout(searchTimer);
     searchAbort?.abort();
     runSearch(q, ++searchSeq);
@@ -1915,8 +1913,6 @@ function bindSearchEvents() {
     $preOfferBtn.setAttribute('aria-pressed', String(redirectToPre));
     setAddButtonLabel();
   });
-  $gotoLink.addEventListener('click', () => setAddMode('link'));
-  $gotoSearch.addEventListener('click', () => setAddMode('search'));
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
@@ -1954,9 +1950,6 @@ function resetForm() {
   $releaseDateField.classList.remove('visible');
   $releaseDateInput.value = '';
   $submitBtn.disabled    = true;
-  addMode = 'search';
-  $searchPane.hidden = false;
-  $linkPane.hidden   = true;
   resetSearchUI();
   // Default label matches the tab the modal was opened from — was hardcoded
   // to 'Add to Shelf' regardless of view, so it showed the wrong destination
