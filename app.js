@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v83'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v84'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -303,32 +303,51 @@ function extractAlbumId(url) {
 // is unreachable (rate-limited, blocked, token failure): the page title carries
 // the artist ("<Title> - Upcoming Album by <Artist>") and the countdown carries
 // the date, so neither depends on Spotify's Web API.
-async function scrapeAlbumPage(albumUrl) {
-  const t = () => AbortSignal.timeout(6000);
+// A page the reader hasn't seen before takes it several seconds to render
+// (2-5s measured on broadband, more on mobile data); a repeat read is cached and
+// fast. The old 6s limit was cutting off first reads of brand-new pre-releases.
+const PAGE_READ_TIMEOUT_MS = 12000;
+
+// Text of a Spotify page: a direct fetch (fails fast on CORS today; kept in case
+// Spotify relaxes it), then the r.jina.ai reader. null if neither answers.
+async function readPageText(url) {
   const attempts = [
-    async () => (await fetch(albumUrl, { signal: t() })).text(),
-    async () => (await fetch('https://r.jina.ai/' + albumUrl, { signal: t() })).text(),
+    () => fetch(url, { signal: AbortSignal.timeout(PAGE_READ_TIMEOUT_MS) }),
+    () => fetch('https://r.jina.ai/' + url, { signal: AbortSignal.timeout(PAGE_READ_TIMEOUT_MS) }),
   ];
   for (const attempt of attempts) {
     try {
-      const text = await attempt();
-      if (!text) continue;
-      let releaseDate = null;
-      const dm = text.match(/Releases on ([A-Za-z]+ \d{1,2}, \d{4})/);
-      if (dm) {
-        const parsed = new Date(dm[1]);
-        if (!isNaN(parsed)) {
-          releaseDate = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
-        }
-      }
-      const am = text.match(/^Title: .+? - (?:Upcoming )?(?:Album|Single|EP|Compilation) by (.+?)(?: \| Spotify)?\s*$/m);
-      const artist = am ? am[1].trim() : null;
-      if (releaseDate || artist) return { releaseDate, artist };
+      const res = await attempt();
+      if (!res.ok) continue;
+      const text = await res.text();
+      if (text) return text;
     } catch (err) {
-      console.log('[LPQ] album page scrape attempt failed:', err?.message || err);
+      console.log('[LPQ] page read attempt failed:', url, err?.message || err);
     }
   }
   return null;
+}
+
+// Artist and countdown date from a read page. Full pages title themselves
+// "<Album> - Upcoming Album by <Artist>"; embed pages use "<Album> - <Artist>".
+function parseReleasePage(text, { embed = false } = {}) {
+  if (!text) return null;
+  let releaseDate = null;
+  const dm = text.match(/Releases on ([A-Za-z]+ \d{1,2}, \d{4})/);
+  if (dm) {
+    const parsed = new Date(dm[1]);
+    if (!isNaN(parsed)) {
+      releaseDate = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+    }
+  }
+  const am = text.match(/^Title: .+? - (?:Upcoming )?(?:Album|Single|EP|Compilation) by (.+?)(?: \| Spotify)?\s*$/m)
+          || (embed ? text.match(/^Title: .+ - (.+?)\s*$/m) : null);
+  const artist = am ? am[1].trim() : null;
+  return releaseDate || artist ? { releaseDate, artist } : null;
+}
+
+async function scrapeAlbumPage(albumUrl) {
+  return parseReleasePage(await readPageText(albumUrl));
 }
 
 async function scrapeCountdownDate(albumUrl) {
@@ -467,34 +486,29 @@ async function fetchPreReleaseMeta(prereleaseUrl) {
   const id = extractAlbumId(prereleaseUrl);
   if (!id) return null;
   const embedUrl = 'https://open.spotify.com/embed/prerelease/' + id;
-  const t = () => AbortSignal.timeout(6000);
+  const t = () => AbortSignal.timeout(PAGE_READ_TIMEOUT_MS);
   const catalogLinkPattern = /open\.spotify\.com\/album\/([A-Za-z0-9]+)/;
 
-  const attempts = [
-    // 1. Direct fetch — free, near-instant fail on CORS today; future-proof
-    //    if Spotify ever relaxes that.
-    async () => (await fetch(embedUrl, { signal: t() })).text(),
-    // 2. r.jina.ai Reader — renders the page and returns clean text
-    //    containing the real catalog link.
-    async () => (await fetch('https://r.jina.ai/' + embedUrl, { signal: t() })).text(),
-  ];
+  // Read the small embed page and the full /prerelease/ page at the same time.
+  // The embed is quicker to render and usually carries everything (artist,
+  // countdown, and sometimes a catalog link); the full page is the backstop.
+  const embedRead = readPageText(embedUrl);
+  const pageRead  = scrapeAlbumPage('https://open.spotify.com/prerelease/' + id);
 
-  let catalogId = null;
-  for (const attempt of attempts) {
-    try {
-      const text = await attempt();
-      const m = text?.match(catalogLinkPattern);
-      if (m) { catalogId = m[1]; break; }
-    } catch (err) {
-      console.log('[LPQ] prerelease resolve attempt failed:', err?.message || err);
-    }
-  }
+  const embedText = await embedRead;
+  const catalogId = embedText?.match(catalogLinkPattern)?.[1] ?? null;
   if (!catalogId) {
-    // Spotify's embed page no longer links to the catalog album for some
+    // Spotify's embed page no longer links to the catalog album for most
     // pre-releases (its "Play on Spotify" link points back at /prerelease/),
-    // but the /prerelease/ page itself still carries the artist and countdown.
-    const page = await scrapeAlbumPage('https://open.spotify.com/prerelease/' + id);
-    return page ? { title: null, artist: page.artist, releaseDate: page.releaseDate, art: null } : null;
+    // but the embed and the /prerelease/ page both carry artist and countdown.
+    const fromEmbed = parseReleasePage(embedText, { embed: true });
+    if (fromEmbed?.artist && fromEmbed?.releaseDate) {
+      return { title: null, artist: fromEmbed.artist, releaseDate: fromEmbed.releaseDate, art: null };
+    }
+    const page = await pageRead;
+    const artist = page?.artist || fromEmbed?.artist || null;
+    const releaseDate = page?.releaseDate || fromEmbed?.releaseDate || null;
+    return artist || releaseDate ? { title: null, artist, releaseDate, art: null } : null;
   }
 
   // Full, accurate metadata straight from Spotify's own catalog API. Its
@@ -736,7 +750,7 @@ async function processPendingShare() {
     // at "Looking up album…" forever with no album and no error.
     data = await Promise.race([
       fetchSpotifyAlbum(albumId, sharedUrl),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 30000)),
     ]);
   } catch (err) {
     done();
@@ -1252,8 +1266,11 @@ async function runLookupDiagnostics(rawUrl) {
   const id = extractAlbumId(rawUrl);
   log(`${APP_VERSION} | online=${navigator.onLine} | AbortSignal.timeout=${typeof AbortSignal?.timeout} | rateLimitedUntil=${getRateLimit() || 'none'}`);
   if (!id) { log('No album id found in that link'); return; }
-  const url = 'https://open.spotify.com/album/' + id;
+  const url = (rawUrl.match(SPOTIFY_LINK_RE)?.[0] || 'https://open.spotify.com/album/' + id).split('?')[0];
+  const isPre = url.includes('/prerelease/');
+  log(`link: ${url}`);
   await step('1 catalog (via proxy)', async () => {
+    if (isPre) return 'skipped — pre-release links are not in the catalog';
     const r = await fetch(`${SPOTIFY_PROXY}/album/${id}`);
     if (!r.ok) return 'HTTP ' + r.status + ' retry-after=' + r.headers.get('retry-after');
     const d = await r.json();
@@ -1263,12 +1280,14 @@ async function runLookupDiagnostics(rawUrl) {
     const r = await fetch('https://open.spotify.com/oembed?url=' + encodeURIComponent(url));
     return r.ok ? (await r.json()).title : 'HTTP ' + r.status;
   });
-  await step('3 page-read', async () => {
-    const r = await fetch('https://r.jina.ai/' + url, { signal: AbortSignal.timeout(8000) });
+  const readStep = async (label, pageUrl) => step(label, async () => {
+    const r = await fetch('https://r.jina.ai/' + pageUrl, { signal: AbortSignal.timeout(PAGE_READ_TIMEOUT_MS + 8000) });
     if (!r.ok) return 'HTTP ' + r.status;
     const text = await r.text();
     return `${text.length} chars | releases=${(text.match(/Releases on [^\n]*/) || ['none'])[0]} | title=${(text.match(/^Title: .*$/m) || ['none'])[0]}`;
   });
+  await readStep('3 page-read', url);
+  if (isPre) await readStep('3b embed-read', 'https://open.spotify.com/embed/prerelease/' + id);
   await step('4 full lookup', async () => {
     const r = await fetchSpotifyAlbum(id, url);
     return `${r.title} | ${r.artist || '(no artist)'} | ${r.releaseDate || '(no date)'}`;
