@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v84'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v85'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -269,7 +269,7 @@ function applySettingsUI() {
   $settingFormatVinyl.setAttribute('aria-pressed', String(!isCD));
   $settingFormatCD.setAttribute('aria-pressed', String(isCD));
   const preferredFormat = settings.preferredFormat || SETTINGS_DEFAULTS.preferredFormat;
-  if ($vinylEmptySub) $vinylEmptySub.textContent = `Long-press an album and choose Buy on ${preferredFormat}`;
+  if ($vinylEmptySub) $vinylEmptySub.textContent = `Tap an album's artwork to shop for ${preferredFormat}`;
   const $version = document.getElementById('appVersion');
   if ($version) $version.textContent = 'LPQ ' + APP_VERSION;
 }
@@ -870,6 +870,14 @@ function renderShelf() {
 
 // Vinyl wishlist: large square artwork on the left, artist/title/year beside.
 // Buy and Remove live in the long-press menu (same pattern as the shelf).
+// Your record shop's search page for an album, in your preferred format. Shared
+// by the long-press "Buy on …" action and the tap on Get Physical artwork.
+function shopSearchUrl(a) {
+  const base   = settings.shopUrl || SETTINGS_DEFAULTS.shopUrl;
+  const format = settings.preferredFormat || SETTINGS_DEFAULTS.preferredFormat;
+  return base + encodeURIComponent([a.artist, a.title, format].filter(Boolean).join(' '));
+}
+
 function renderVinyl() {
   const vinyl = albums.filter(a => a.vinyl);
   $vinylList.innerHTML = '';
@@ -1341,8 +1349,20 @@ function bindEvents() {
   // ── Long press on vinyl rows (mirrors shelf) ─────────────────────────────
   bindLongPress($vinylList, '.vinyl-row');
 
-  // No tap-to-Spotify in the vinyl wishlist — it's a shopping list, not a
-  // streaming shortcut. (Long-press still offers Buy / Remove / Wikipedia.)
+  // Tapping a Get Physical album's artwork opens your shop's search for it in
+  // your preferred format (same link as long-press > Buy). Not Spotify: this
+  // list is a shopping list, not a streaming shortcut. Taps beside the artwork
+  // do nothing, so scrolling by the text can't fling you into a shop.
+  $vinylList.addEventListener('click', e => {
+    if (lpFired) { lpFired = false; return; }
+    const row = e.target.closest('.vinyl-row');
+    if (!row) return;
+    const art = row.querySelector('.vinyl-art')?.getBoundingClientRect();
+    if (!art || e.clientX < art.left || e.clientX > art.right || e.clientY < art.top || e.clientY > art.bottom) return;
+    const a = albums.find(a => a.id === row.dataset.id);
+    if (!a) return;
+    window.open(shopSearchUrl(a), '_blank');
+  });
 
   // ── Context menu actions ──────────────────────────────────────────────────
   $ctxMoveToShelf.addEventListener('click', () => {
@@ -1388,9 +1408,7 @@ function bindEvents() {
     if (!id) return;
     const a = albums.find(a => a.id === id);
     if (!a) return;
-    const base   = settings.shopUrl || SETTINGS_DEFAULTS.shopUrl;
-    const format = settings.preferredFormat || SETTINGS_DEFAULTS.preferredFormat;
-    window.open(base + encodeURIComponent(a.artist + ' ' + a.title + ' ' + format), '_blank');
+    window.open(shopSearchUrl(a), '_blank');
     closeContextMenu();
   });
 
