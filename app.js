@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v88'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v89'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -354,7 +354,7 @@ function parseReleasePage(text, { embed = false } = {}) {
   }
   const am = text.match(/^Title: .+? - (?:Upcoming )?(?:Album|Single|EP|Compilation) by (.+?)(?: \| Spotify)?\s*$/m)
           || (embed ? text.match(/^Title: .+ - (.+?)\s*$/m) : null);
-  const artist = am ? am[1].trim() : null;
+  const artist = am ? am[1].replace(/\s*\|\s*Spotify\s*$/i, '').trim() || null : null;
   return releaseDate || artist ? { releaseDate, artist } : null;
 }
 
@@ -669,6 +669,7 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
     localStorage.removeItem('lpq-rl');
   }
 
+  cleanSpotifyArtistSuffix();
   checkPreReleases();
   render();
   bindEvents();
@@ -1278,6 +1279,19 @@ function bindLongPress(container, cardSelector, skip) {
 // ─── Backup: export / import ──────────────────────────────────────────────────
 // Everything LPQ knows lives in this browser's storage, so Settings can save it
 // to a file (kept in Drive, email, ...) and restore it from one.
+// Albums saved while the page reader kept Spotify's "| Spotify" title suffix on the artist.
+function cleanSpotifyArtistSuffix() {
+  let changed = false;
+  for (const a of albums) {
+    if (typeof a.artist === 'string' && /\s*\|\s*Spotify\s*$/i.test(a.artist)) {
+      a.artist = a.artist.replace(/\s*\|\s*Spotify\s*$/i, '').trim();
+      a.label = null; // any label looked up for the wrong artist name is worth retrying
+      changed = true;
+    }
+  }
+  if (changed) save();
+}
+
 function lsNum(k) { const n = Number(localStorage.getItem(k)); return Number.isFinite(n) && n > 0 ? n : 0; }
 
 function buildBackup() {
@@ -1605,6 +1619,8 @@ async function runLookupDiagnostics(rawUrl) {
   };
   const id = extractAlbumId(rawUrl);
   log(`${APP_VERSION} | online=${navigator.onLine} | AbortSignal.timeout=${typeof AbortSignal?.timeout} | rateLimitedUntil=${getRateLimit() || 'none'}`);
+  const exportErr = localStorage.getItem('lpq-last-export-error');
+  log('Last backup error: ' + (exportErr || 'none'));
   if (!id) { log('No album id found in that link'); return; }
   const url = (rawUrl.match(SPOTIFY_LINK_RE)?.[0] || 'https://open.spotify.com/album/' + id).split('?')[0];
   const isPre = url.includes('/prerelease/');
@@ -1635,8 +1651,6 @@ async function runLookupDiagnostics(rawUrl) {
   try {
     const last = localStorage.getItem('lpq-last-share');
     if (last) log('Last share received:\n' + JSON.stringify(JSON.parse(last), null, 1));
-    const exportErr = localStorage.getItem('lpq-last-export-error');
-    if (exportErr) log('Last backup error: ' + exportErr);
   } catch {}
 }
 
