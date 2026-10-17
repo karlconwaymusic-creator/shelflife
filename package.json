@@ -1,0 +1,9 @@
+{
+  "name": "lpq",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/logic.test.mjs worker/test/worker.test.mjs",
+    "test:app": "node --test tests/logic.test.mjs",
+    "test:worker": "node --test worker/test/worker.test.mjs"
+  }
+}
