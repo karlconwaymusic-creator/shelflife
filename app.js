@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v85'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v86'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -1258,6 +1258,52 @@ function bindLongPress(container, cardSelector, skip) {
   container.addEventListener('contextmenu',   e => e.preventDefault());
 }
 
+// ─── Swipe between tabs ───────────────────────────────────────────────────────
+// A quick sideways flick moves to the neighbouring tab in bottom-bar order (no
+// wrap-around, no sliding animation — same instant switch as tapping a tab).
+// It stays out of the way of: vertical scrolling (must be mostly horizontal),
+// slow drags, form controls (the Shelf Size slider), an open sheet or menu, a
+// long-press, multi-finger gestures, and the screen edges where Android's own
+// back gesture lives.
+const SWIPE_MIN_DX   = 60;   // px of horizontal travel
+const SWIPE_MAX_MS   = 600;  // slower than this is a drag, not a flick
+const SWIPE_RATIO    = 1.8;  // horizontal must beat vertical by this factor
+const SWIPE_EDGE_PX  = 24;
+let swipeStart = null;
+
+function bindSwipeNav() {
+  document.addEventListener('touchstart', e => {
+    swipeStart = null;
+    lpFired = false; // so touchend can tell a long-press in *this* touch from a stale one
+    if (e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (t.clientX < SWIPE_EDGE_PX || t.clientX > window.innerWidth - SWIPE_EDGE_PX) return;
+    if (e.target.closest('input, textarea, select, button, [contenteditable]')) return;
+    if ($overlay.classList.contains('visible') || !$modal.hidden || !$contextMenu.hidden) return;
+    swipeStart = { x: t.clientX, y: t.clientY, at: Date.now() };
+  }, { passive: true });
+
+  document.addEventListener('touchmove', e => {
+    if (e.touches.length > 1) swipeStart = null;
+  }, { passive: true });
+
+  document.addEventListener('touchcancel', () => { swipeStart = null; }, { passive: true });
+
+  document.addEventListener('touchend', e => {
+    const start = swipeStart;
+    swipeStart = null;
+    if (!start || lpFired) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Date.now() - start.at > SWIPE_MAX_MS) return;
+    if (Math.abs(dx) < SWIPE_MIN_DX || Math.abs(dx) < Math.abs(dy) * SWIPE_RATIO) return;
+    const order = [...document.querySelectorAll('.tab-btn')].map(b => b.dataset.view);
+    const next = order[order.indexOf(currentView) + (dx < 0 ? 1 : -1)];
+    if (next) switchView(next);
+  }, { passive: true });
+}
+
 // ─── Event wiring ─────────────────────────────────────────────────────────────
 // Settings → Lookup Diagnostics: runs each stage of an album lookup on this
 // device and prints the outcome, so a failure that only happens on one
@@ -1308,6 +1354,7 @@ async function runLookupDiagnostics(rawUrl) {
 
 function bindEvents() {
   bindSearchEvents();
+  bindSwipeNav();
   document.getElementById('diagRun').addEventListener('click', () => {
     const v = document.getElementById('diagUrl').value.trim();
     if (v) runLookupDiagnostics(v);
