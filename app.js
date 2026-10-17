@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v87'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v88'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -1291,28 +1291,49 @@ function buildBackup() {
   };
 }
 
+// Save the file by downloading it (works wherever the share sheet doesn't).
+function downloadBackupFile(file) {
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url; a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
 async function exportBackup() {
-  const name = `lpq-backup-${localISODate()}.json`;
-  const json = JSON.stringify(buildBackup(), null, 1);
-  const file = new File([json], name, { type: 'application/json' });
+  const recordFailure = err => {
+    const reason = `${err?.name || 'Error'}: ${err?.message || err}`;
+    try { localStorage.setItem('lpq-last-export-error', `${new Date().toISOString()} ${reason}`); } catch {}
+    return reason;
+  };
+  let file;
   try {
-    if (navigator.canShare?.({ files: [file] })) {
-      await navigator.share({ files: [file], title: 'LPQ backup' }); // share sheet: Drive, email, ...
-    } else {
-      const url = URL.createObjectURL(file);
-      const a = document.createElement('a');
-      a.href = url; a.download = name;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-    }
+    const name = `lpq-backup-${localISODate()}.json`;
+    file = new File([JSON.stringify(buildBackup(), null, 1)], name, { type: 'application/json' });
   } catch (err) {
-    if (err?.name === 'AbortError') return; // closed the share sheet — nothing was saved
-    showToast('Couldn\'t create the backup');
+    showToast('Couldn\'t create the backup: ' + recordFailure(err));
     return;
+  }
+
+  let note = 'Backup ready';
+  let shared = false;
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: 'LPQ backup' }); // share sheet: Drive, email, ...
+      shared = true;
+    } catch (err) {
+      if (err?.name === 'AbortError') return; // closed the share sheet — nothing was saved
+      recordFailure(err);                      // share sheet refused — fall back to a download below
+      note = 'Share sheet unavailable — backup saved to Downloads';
+    }
+  }
+  if (!shared) {
+    try { downloadBackupFile(file); }
+    catch (err) { showToast('Couldn\'t create the backup: ' + recordFailure(err)); return; }
   }
   localStorage.setItem('lpq-last-backup', String(Date.now()));
   renderBackupStatus();
-  showToast('Backup ready');
+  showToast(note);
 }
 
 // A backup is just text, so treat it as untrusted: keep only known fields with
@@ -1614,6 +1635,8 @@ async function runLookupDiagnostics(rawUrl) {
   try {
     const last = localStorage.getItem('lpq-last-share');
     if (last) log('Last share received:\n' + JSON.stringify(JSON.parse(last), null, 1));
+    const exportErr = localStorage.getItem('lpq-last-export-error');
+    if (exportErr) log('Last backup error: ' + exportErr);
   } catch {}
 }
 
