@@ -1085,3 +1085,51 @@ main { padding: 0; }
   bottom: 0;
   box-shadow: 0 0 0 12px #1c1c1e;
 }
+
+
+/* ─── Settings: backup ────────────────────────────────────────────────────── */
+.backup-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.settings-btn {
+  min-height: 44px;
+  padding: 0 16px;
+  background: var(--surface2);
+  color: var(--text);
+  border: none;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.settings-btn:active { transform: scale(0.97); }
+.settings-btn--primary { background: var(--accent); color: #000; }
+.settings-btn[disabled] { opacity: 0.5; cursor: default; }
+.backup-status.is-due { color: #ffb340; }
+.import-panel {
+  margin-top: 6px;
+  padding: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.import-panel[hidden], .import-undo[hidden] { display: none !important; }
+.import-panel:focus { outline: none; }
+.import-summary { font-size: 0.9rem; color: var(--text); line-height: 1.45; }
+.import-undo {
+  margin-top: 6px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.86rem;
+  color: var(--text2);
+}
+.import-undo span { flex: 1 1 160px; }

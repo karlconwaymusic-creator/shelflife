@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = 'v86'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
+const APP_VERSION = 'v87'; // bump alongside sw.js CACHE and the ?v= query strings in index.html
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let albums = [];
@@ -18,6 +18,17 @@ let selectSeq    = 0;            // invalidates a pick still being resolved
 let searchTimer  = null;
 let searchAbort  = null;
 let searchShown  = [];           // results currently rendered, index-aligned with the radios
+
+// Backup (export / import) — declared up here because startup code runs before the backup section below.
+const BACKUP_VERSION    = 1;
+const BACKUP_MAX_BYTES  = 5 * 1024 * 1024;
+const BACKUP_MAX_ALBUMS = 2000;
+const DAY_MS            = 24 * 60 * 60 * 1000;
+const BACKUP_NUDGE_MS        = 30 * DAY_MS; // remind when the last backup is this old...
+const BACKUP_FIRST_NUDGE_MS  = 3 * DAY_MS;  // ...or this soon after install if there never was one
+const BACKUP_NUDGE_REPEAT_MS = 7 * DAY_MS;  // and then no more than once a week
+const SPOTIFY_URL_OK = /^https:\/\/open\.spotify\.com\/(?:intl-[a-z]+\/)?(?:album|prerelease)\/[A-Za-z0-9]+/;
+let pendingImport = null;                   // parsed + sanitised file awaiting Replace / Add
 
 const MAX_ALBUMS = 20; // hard ceiling; user limit is settings.shelfSize
 
@@ -272,6 +283,7 @@ function applySettingsUI() {
   if ($vinylEmptySub) $vinylEmptySub.textContent = `Tap an album's artwork to shop for ${preferredFormat}`;
   const $version = document.getElementById('appVersion');
   if ($version) $version.textContent = 'LPQ ' + APP_VERSION;
+  renderBackupStatus();
 }
 
 // ─── Spotify ──────────────────────────────────────────────────────────────────
@@ -670,8 +682,13 @@ const $ctxRemoveLbl  = document.getElementById('ctxRemoveLabel');
   const validViews = ['shelf', 'prerelease', 'vinyl', 'archive', 'settings'];
   if (savedView && validViews.includes(savedView)) switchView(savedView);
 
+  // Ask the browser to protect this storage from being cleared when space is tight.
+  navigator.storage?.persist?.().catch(() => {});
+
   // Handle an album shared in from Spotify via the Android share sheet
+  const openedViaShare = ['url', 'text', 'title'].some(k => new URLSearchParams(window.location.search).has(k));
   handleShareTarget();
+  maybeNudgeBackup(openedViaShare);
 
   // SW registration and update logic lives in the inline script in index.html
   // so it always runs from the network-fresh HTML regardless of cached app.js.
@@ -1258,6 +1275,254 @@ function bindLongPress(container, cardSelector, skip) {
   container.addEventListener('contextmenu',   e => e.preventDefault());
 }
 
+// ─── Backup: export / import ──────────────────────────────────────────────────
+// Everything LPQ knows lives in this browser's storage, so Settings can save it
+// to a file (kept in Drive, email, ...) and restore it from one.
+function lsNum(k) { const n = Number(localStorage.getItem(k)); return Number.isFinite(n) && n > 0 ? n : 0; }
+
+function buildBackup() {
+  return {
+    app: 'LPQ',
+    backupVersion: BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    appVersion: APP_VERSION,
+    settings: { ...settings },
+    albums,
+  };
+}
+
+async function exportBackup() {
+  const name = `lpq-backup-${localISODate()}.json`;
+  const json = JSON.stringify(buildBackup(), null, 1);
+  const file = new File([json], name, { type: 'application/json' });
+  try {
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'LPQ backup' }); // share sheet: Drive, email, ...
+    } else {
+      const url = URL.createObjectURL(file);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') return; // closed the share sheet — nothing was saved
+    showToast('Couldn\'t create the backup');
+    return;
+  }
+  localStorage.setItem('lpq-last-backup', String(Date.now()));
+  renderBackupStatus();
+  showToast('Backup ready');
+}
+
+// A backup is just text, so treat it as untrusted: keep only known fields with
+// the right types, and only accept genuine Spotify / https addresses — album
+// links are opened when tapped, so an arbitrary string must never get in.
+function cleanStr(v, max) { return typeof v === 'string' ? v.trim().slice(0, max) : ''; }
+
+function sanitizeAlbum(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const title = cleanStr(raw.title, 300);
+  if (!title) return null;
+  const album = {
+    id:          cleanStr(raw.id, 80) || uid(),
+    title,
+    artist:      cleanStr(raw.artist, 300),
+    art:         typeof raw.art === 'string' && /^https:\/\//.test(raw.art) && raw.art.length <= 2000 ? raw.art : null,
+    spotifyUrl:  typeof raw.spotifyUrl === 'string' && SPOTIFY_URL_OK.test(raw.spotifyUrl) && raw.spotifyUrl.length <= 500 ? raw.spotifyUrl : null,
+    year:        /^\d{4}$/.test(String(raw.year ?? '')) ? String(raw.year) : null,
+    releaseDate: /^\d{4}(-\d{2}(-\d{2})?)?$/.test(String(raw.releaseDate ?? '')) ? String(raw.releaseDate) : null,
+    label:       typeof raw.label === 'string' ? raw.label.trim().slice(0, 200) : null, // '' = looked up, no match
+    addedAt:     Number.isFinite(raw.addedAt) ? raw.addedAt : Date.now(),
+    vinyl:       raw.vinyl === true,
+    detached:    raw.detached === true,
+    archived:    raw.archived === true,
+    preRelease:  raw.preRelease === true,
+  };
+  if (Number.isFinite(raw.shelfFullSince)) album.shelfFullSince = raw.shelfFullSince;
+  return album;
+}
+
+function sanitizeSettings(raw) {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const size = Math.round(Number(r.shelfSize));
+  return {
+    archiveOnRemove: typeof r.archiveOnRemove === 'boolean' ? r.archiveOnRemove : SETTINGS_DEFAULTS.archiveOnRemove,
+    shelfSize:       Number.isFinite(size) && size >= 1 && size <= MAX_ALBUMS ? size : SETTINGS_DEFAULTS.shelfSize,
+    shopUrl:         typeof r.shopUrl === 'string' && /^https?:\/\/\S+$/i.test(r.shopUrl.trim()) ? r.shopUrl.trim().slice(0, 500) : SETTINGS_DEFAULTS.shopUrl,
+    archiveView:     ['mosaic', 'list'].includes(r.archiveView) ? r.archiveView : SETTINGS_DEFAULTS.archiveView,
+    preferredFormat: ['Vinyl', 'CD'].includes(r.preferredFormat) ? r.preferredFormat : SETTINGS_DEFAULTS.preferredFormat,
+  };
+}
+
+function parseBackup(text) {
+  let obj;
+  try { obj = JSON.parse(text); } catch { throw new Error('That file isn\'t a readable backup.'); }
+  if (!obj || obj.app !== 'LPQ' || !Array.isArray(obj.albums)) throw new Error('That doesn\'t look like an LPQ backup.');
+  if (Number(obj.backupVersion) > BACKUP_VERSION) throw new Error('That backup was made by a newer version of LPQ. Update the app first.');
+  if (obj.albums.length > BACKUP_MAX_ALBUMS) throw new Error('That backup is too large to import.');
+  const seenIds = new Set();
+  const imported = [];
+  let skipped = 0;
+  for (const raw of obj.albums) {
+    const a = sanitizeAlbum(raw);
+    if (!a) { skipped++; continue; }
+    if (seenIds.has(a.id)) a.id = uid();
+    seenIds.add(a.id);
+    imported.push(a);
+  }
+  if (!imported.length && obj.albums.length) throw new Error('None of the albums in that file could be read.');
+  return { albums: imported, settings: sanitizeSettings(obj.settings), skipped, exportedAt: typeof obj.exportedAt === 'string' ? obj.exportedAt : null };
+}
+
+function albumSection(a) {
+  return a.archived ? 'archive' : a.preRelease ? 'prerelease' : (a.vinyl || a.detached) ? 'vinyl' : 'shelf';
+}
+
+function describeBackup(b) {
+  const n = { shelf: 0, vinyl: 0, prerelease: 0, archive: 0 };
+  for (const a of b.albums) n[albumSection(a)]++;
+  const when = b.exportedAt && !isNaN(new Date(b.exportedAt)) ? ` Saved ${formatReleaseDate(localISODate(new Date(b.exportedAt)))}.` : '';
+  return `${b.albums.length} album${b.albums.length === 1 ? '' : 's'}: ${n.shelf} on Shelf, ${n.vinyl} on Get Physical, ${n.prerelease} in Pre-Releases, ${n.archive} in Archive.${when}` +
+    (b.skipped ? ` ${b.skipped} unreadable entr${b.skipped === 1 ? 'y' : 'ies'} will be left out.` : '');
+}
+
+function hideImportPanel() {
+  pendingImport = null;
+  document.getElementById('importPanel').hidden = true;
+}
+
+async function chooseBackupFile(file) {
+  if (!file) return;
+  hideImportPanel();
+  try {
+    if (file.size > BACKUP_MAX_BYTES) throw new Error('That file is too large to be an LPQ backup.');
+    pendingImport = parseBackup(await file.text());
+  } catch (err) {
+    showToast(err.message || 'Couldn\'t read that file');
+    return;
+  }
+  document.getElementById('importSummary').textContent = describeBackup(pendingImport);
+  const panel = document.getElementById('importPanel');
+  panel.hidden = false;
+  panel.focus();
+}
+
+function snapshotBeforeImport() {
+  try {
+    localStorage.setItem('lpq-before-import', JSON.stringify({ at: Date.now(), albums, settings }));
+  } catch { /* storage too full for a safety copy — carry on, the import still works */ }
+}
+
+function applyImport(mode) {
+  const b = pendingImport;
+  if (!b) return;
+  snapshotBeforeImport();
+  let message;
+  if (mode === 'replace') {
+    albums = b.albums;
+    settings = b.settings;
+    saveSettings();
+    message = `Restored ${b.albums.length} album${b.albums.length === 1 ? '' : 's'} and your settings`;
+  } else {
+    // Add only what isn't owned already (same Spotify album, or same title + artist).
+    const key = a => normAlbumKey(a.title) + '|' + normAlbumKey(a.artist);
+    const ids = new Set(albums.map(a => a.spotifyUrl && extractAlbumId(a.spotifyUrl)).filter(Boolean));
+    const keys = new Set(albums.map(key));
+    const usedIds = new Set(albums.map(a => a.id));
+    let onShelf = albums.filter(a => albumSection(a) === 'shelf').length;
+    let added = 0, dupes = 0, toArchive = 0;
+    for (const a of b.albums) {
+      const sid = a.spotifyUrl && extractAlbumId(a.spotifyUrl);
+      if ((sid && ids.has(sid)) || keys.has(key(a))) { dupes++; continue; }
+      if (usedIds.has(a.id)) a.id = uid();
+      // A full shelf can't take more: park the extras in Archive instead of losing them.
+      if (albumSection(a) === 'shelf') {
+        if (onShelf >= settings.shelfSize) { a.archived = true; toArchive++; } else onShelf++;
+      }
+      if (sid) ids.add(sid);
+      keys.add(key(a)); usedIds.add(a.id);
+      albums.push(a);
+      added++;
+    }
+    message = `Added ${added} album${added === 1 ? '' : 's'}` + (dupes ? `, skipped ${dupes} you already have` : '') + (toArchive ? `, ${toArchive} went to Archive (shelf full)` : '');
+  }
+  save();
+  checkPreReleases();
+  render();
+  applySettingsUI();
+  hideImportPanel();
+  renderUndoRow();
+  showToast(message);
+}
+
+function undoImport() {
+  let snap = null;
+  try { snap = JSON.parse(localStorage.getItem('lpq-before-import') || 'null'); } catch {}
+  if (!snap || !Array.isArray(snap.albums)) return;
+  albums = snap.albums;
+  settings = { ...SETTINGS_DEFAULTS, ...(snap.settings || {}) };
+  saveSettings();
+  save();
+  render();
+  applySettingsUI();
+  localStorage.removeItem('lpq-before-import');
+  renderUndoRow();
+  showToast('Import undone');
+}
+
+function renderUndoRow() {
+  const row = document.getElementById('undoRow');
+  let snap = null;
+  try { snap = JSON.parse(localStorage.getItem('lpq-before-import') || 'null'); } catch {}
+  if (snap && Date.now() - snap.at > 7 * DAY_MS) { localStorage.removeItem('lpq-before-import'); snap = null; }
+  row.hidden = !snap;
+  if (snap) {
+    const mins = Math.max(0, Math.round((Date.now() - snap.at) / 60000));
+    document.getElementById('undoText').textContent = `Your albums and settings from before the last import are saved (${mins < 1 ? 'just now' : mins < 60 ? mins + ' min ago' : mins < 1440 ? Math.round(mins / 60) + ' h ago' : Math.round(mins / 1440) + ' d ago'}).`;
+  }
+}
+
+function backupIsDue(now = Date.now()) {
+  if (!albums.length) return false;
+  const last = lsNum('lpq-last-backup');
+  const since = last || lsNum('lpq-first-seen') || now;
+  return now - since >= (last ? BACKUP_NUDGE_MS : BACKUP_FIRST_NUDGE_MS);
+}
+
+function renderBackupStatus() {
+  const el = document.getElementById('backupStatus');
+  if (!el) return;
+  const last = lsNum('lpq-last-backup');
+  const days = Math.floor((Date.now() - last) / DAY_MS);
+  const when = !last ? 'never' : days < 1 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+  const due = backupIsDue();
+  el.textContent = `Last backup: ${when}` + (due ? ' — due for a backup' : '');
+  el.classList.toggle('is-due', due);
+}
+
+// Once a month (sooner if you've never backed up), a one-line reminder on opening the app.
+function maybeNudgeBackup(skip) {
+  if (!localStorage.getItem('lpq-first-seen')) localStorage.setItem('lpq-first-seen', String(Date.now()));
+  if (skip || !backupIsDue()) return;
+  if (Date.now() - lsNum('lpq-nudged-at') < BACKUP_NUDGE_REPEAT_MS) return;
+  localStorage.setItem('lpq-nudged-at', String(Date.now()));
+  setTimeout(() => showToast('Time to back up your albums — Settings → Backup'), 2500);
+}
+
+function bindBackup() {
+  const file = document.getElementById('backupFile');
+  document.getElementById('backupExport').addEventListener('click', exportBackup);
+  document.getElementById('backupImport').addEventListener('click', () => file.click());
+  file.addEventListener('change', () => { const f = file.files[0]; file.value = ''; chooseBackupFile(f); });
+  document.getElementById('importReplace').addEventListener('click', () => applyImport('replace'));
+  document.getElementById('importMerge').addEventListener('click', () => applyImport('merge'));
+  document.getElementById('importCancel').addEventListener('click', hideImportPanel);
+  document.getElementById('importUndo').addEventListener('click', undoImport);
+  renderUndoRow();
+  renderBackupStatus();
+}
+
 // ─── Swipe between tabs ───────────────────────────────────────────────────────
 // A quick sideways flick moves to the neighbouring tab in bottom-bar order (no
 // wrap-around, no sliding animation — same instant switch as tapping a tab).
@@ -1355,6 +1620,7 @@ async function runLookupDiagnostics(rawUrl) {
 function bindEvents() {
   bindSearchEvents();
   bindSwipeNav();
+  bindBackup();
   document.getElementById('diagRun').addEventListener('click', () => {
     const v = document.getElementById('diagUrl').value.trim();
     if (v) runLookupDiagnostics(v);

@@ -12,7 +12,7 @@
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <link rel="stylesheet" href="styles.css?v=86">
+  <link rel="stylesheet" href="styles.css?v=87">
   <!-- SW bootstrap — inline so it runs from the always-fresh index.html,
        not from potentially-stale cached app.js -->
   <script>
@@ -161,6 +161,32 @@
             <button type="button" id="settingFormatCD" class="segmented-btn" aria-pressed="false">CD</button>
           </div>
           <div class="settings-desc">Included alongside the artist and album title when you tap Buy on the Get Physical tab.</div>
+        </div>
+
+        <div class="settings-row settings-row--col" id="backupRow">
+          <div class="settings-title">Backup</div>
+          <div class="settings-desc">Save your albums and settings to a file you can keep in Google Drive or email to yourself, and restore them from that file later.</div>
+          <div class="backup-actions">
+            <button type="button" id="backupExport" class="settings-btn">Export backup</button>
+            <button type="button" id="backupImport" class="settings-btn">Import backup</button>
+          </div>
+          <input type="file" id="backupFile" accept=".json,application/json" hidden>
+          <div id="backupStatus" class="settings-desc backup-status" role="status" aria-live="polite"></div>
+
+          <div id="importPanel" class="import-panel" role="group" aria-label="Import options" tabindex="-1" hidden>
+            <div id="importSummary" class="import-summary"></div>
+            <div class="backup-actions">
+              <button type="button" id="importReplace" class="settings-btn settings-btn--primary">Replace everything</button>
+              <button type="button" id="importMerge" class="settings-btn">Add missing albums</button>
+              <button type="button" id="importCancel" class="settings-btn">Cancel</button>
+            </div>
+            <div class="settings-desc">Replace swaps in everything from the file, settings included. Add missing albums keeps what you have and only adds albums you don't already own.</div>
+          </div>
+
+          <div id="undoRow" class="import-undo" hidden>
+            <span id="undoText"></span>
+            <button type="button" id="importUndo" class="settings-btn">Undo import</button>
+          </div>
         </div>
 
         <div class="settings-row settings-row--col">
@@ -405,6 +431,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=86"></script>
+  <script src="app.js?v=87"></script>
 </body>
 </html>
